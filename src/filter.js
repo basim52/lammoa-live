@@ -67,8 +67,10 @@ export function deflection() { di = (di + 1) % DEFLECT.length; return DEFLECT[di
 const SAFE_NAME = 'يا الغالي';
 export function safeName(name) {
   if (!name) return '';
+  const raw = String(name).replace(/\s/g, '');
   let n = String(name).replace(/[^\p{Script=Arabic}A-Za-z0-9 _.-]/gu, '').replace(/[_.\-]+/g, ' ').trim().slice(0, 20);
   // unreadable (emoji/other scripts/too few letters) -> generic, so TTS doesn't stumble
-  if ((n.match(/[\p{Script=Arabic}A-Za-z]/gu) || []).length < 2) return SAFE_NAME;
+  const letters = (n.match(/[\p{Script=Arabic}A-Za-z]/gu) || []).length;
+  if (letters < 3 || letters < [...raw].length * 0.6) return SAFE_NAME;
   return checkText(n) ? SAFE_NAME : n;
 }

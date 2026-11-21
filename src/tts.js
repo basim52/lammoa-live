@@ -43,11 +43,24 @@ async function synthOnce(text, model) {
     if (!part) throw new Error(`Gemini TTS no audio (${j.candidates?.[0]?.finishReason || 'unknown'})`);
     const mime = part.inlineData.mimeType || '';
     const rate = Number((mime.match(/rate=(\d+)/) || [])[1] || 24000);
-    const pcm = Buffer.from(part.inlineData.data, 'base64');
+    const pcm = trimSilence(Buffer.from(part.inlineData.data, 'base64'), rate);
     const wav = pcmToWav(pcm, rate);
     return { wav, durationMs: Math.round((pcm.length / 2 / rate) * 1000) };
   } catch (e) {
     if (e.name === 'AbortError') throw new Error(`Gemini TTS ${model} timeout`);
     throw e;
   } finally { clearTimeout(t); }
+}
+
+// Trim leading/trailing near-silence (TTS sometimes pads several seconds), keep 150 ms margins.
+function trimSilence(pcm, rate) {
+  const n = Math.floor(pcm.length / 2); if (!n) return pcm;
+  const win = Math.floor(rate * 0.02), thr = 500;
+  const loud = (i) => { let m = 0; for (let k = i; k < Math.min(n, i + win); k++) { const v = Math.abs(pcm.readInt16LE(k * 2)); if (v > m) m = v; } return m > thr; };
+  let a = 0; while (a < n && !loud(a)) a += win;
+  let b = n - win; while (b > a && !loud(b)) b -= win;
+  if (a >= b) return pcm;
+  const pad = Math.floor(rate * 0.15);
+  a = Math.max(0, a - pad); b = Math.min(n, b + win + pad);
+  return pcm.subarray(a * 2, b * 2);
 }

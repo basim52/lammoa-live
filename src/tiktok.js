@@ -41,7 +41,7 @@ export function connectTikTok(username, onEvent, log = console.log, onStatus = (
       return { ok: true };
     } catch (e) {
       log('[tiktok] connect failed:', e?.message || String(e));
-      onStatus(/offline|isn't online/i.test(e?.message || '') ? 'offline (البث مو شغال)' : 'error: ' + (e?.message || String(e)).slice(0, 80));
+      onStatus(/offline|isn't online|Room ID/i.test(e?.message || '') ? 'offline (البث مو شغال حالياً، بيتصل تلقائياً أول ما تبدأ)' : 'error: ' + (e?.message || String(e)).slice(0, 80));
       if (!stopped) scheduleRetry();
       return { ok: false, error: e?.message || String(e) };
     }
