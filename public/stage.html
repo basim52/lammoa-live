@@ -82,9 +82,24 @@
   #mic span { display:block; background:rgba(11,42,111,.9); color:#fff; border:.35vmin solid #fff; border-radius:3vmin; padding:.5vmin 2.4vmin; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; unicode-bidi:plaintext; box-shadow:0 .5vmin 1.2vmin rgba(0,0,0,.3); }
   #mic span:empty { display:none; }
   #mic[data-state=denied] span { background:#B3122E; }
+  /* filler picker (start screen) + tiny reopen button */
+  #start { overflow-y:auto; justify-content:safe center; padding:3vmin 0; }
+  #pick { width:min(94vw, 150vmin); display:flex; flex-direction:column; align-items:center; gap:2vmin; direction:rtl; cursor:default; }
+  #pick h2 { margin:0; font-family:Lalezar,sans-serif; font-weight:400; font-size:5vmin; color:#FFC93C; text-align:center; }
+  #pick .row { display:flex; flex-wrap:wrap; justify-content:center; gap:1.6vmin; }
+  #pick button { font-family:Lalezar,sans-serif; color:#0B2A6F; background:#fff; border:.6vmin solid #fff; border-radius:3vmin; cursor:pointer; box-shadow:0 .8vmin 0 rgba(0,0,0,.25); }
+  #pick .big button { font-size:4.6vmin; padding:1.4vmin 3.4vmin; }
+  #pick .chips button { font-size:3.4vmin; padding:1vmin 2.4vmin; border-radius:5vmin; }
+  #pick button.on { background:#FFC93C; border-color:#0B2A6F; }
+  #pick .chips button.on::before { content:'✓ '; }
+  #pick small { font-family:Tajawal,sans-serif; font-weight:800; font-size:2.8vmin; opacity:.9; }
+  #start.again p.help { display:none; }
+  #topicsBtn { position:fixed; bottom:1.2vmin; right:1.5vmin; z-index:5; font-family:Tajawal,sans-serif; font-weight:800; font-size:2.3vmin; color:#fff; background:rgba(11,42,111,.35); border:0; border-radius:2vmin; padding:.4vmin 1.4vmin; opacity:.35; cursor:pointer; }
+  #topicsBtn:hover, #topicsBtn:focus { opacity:.9; }
+  body.starting #topicsBtn { display:none; }
 </style>
 </head>
-<body>
+<body class="starting">
 <div id="scene"><div class="layer"></div><div class="layer"></div></div>
 <canvas id="fx"></canvas>
 <div id="stage">
@@ -93,7 +108,8 @@
 </div>
 <div id="title"><span class="name">لمّوعة</span><span class="brand">فرفشة</span></div>
 <div id="dot" title="الاتصال"></div>
-<div id="start"><button id="go">اضغط للتشغيل</button><p>بعد الضغط: الشاشة تبقى شغالة، صوت لمّوعة يطلع من الجهاز، وهي تسمعك من المايك. ارفع الصوت، وإذا سألك المتصفح عن المايك اضغط «سماح».</p></div>
+<button id="topicsBtn" type="button">المواضيع</button>
+<div id="start"><div id="pick"><h2>وش تسولف لمّوعة لما البث هادي؟</h2><div class="row big" id="presets"></div><small>أو اختر مواضيع بعينها (تقدر تختار أكثر من واحد):</small><div class="row chips" id="chips"></div></div><button id="go">اضغط للتشغيل</button><p class="help">بعد الضغط: الشاشة تبقى شغالة، صوت لمّوعة يطلع من الجهاز، وهي تسمعك من المايك. ارفع الصوت، وإذا سألك المتصفح عن المايك اضغط «سماح».</p></div>
 <script src="/lammoa.js"></script>
 <script src="/mic.js"></script>
 <script src="/filler.js"></script>
@@ -130,17 +146,61 @@
     try { if ('wakeLock' in navigator) { lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => { lock = null; }); } } catch (e) { console.warn('wakeLock', e); }
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !lock) keepAwake(); });
+  // ---- filler picker: الكل / الكلام المنوّع / ١٠ مواضيع / pick topics; remembered on this device ----
+  const AR = (n) => String(n).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[d]);
+  let sel = null; // null = all, else Set of keys ('a' + topic ids)
+  function renderPick() {
+    const info = window.__fillerInfo; if (!info) return;
+    const ids = info.topics.map((t) => t.id);
+    const isAll = !sel || (sel.has('a') && ids.every((i) => sel.has(i)));
+    const isB = !isAll && !sel.has('a') && ids.every((i) => sel.has(i));
+    const pre = document.getElementById('presets'); pre.innerHTML = '';
+    [['all', 'الكل', isAll], ['a', `الكلام المنوّع (${AR(Math.round(info.aMs / 60000))} دقيقة)`, !isAll && sel.has('a')], ['b', `${AR(ids.length)} مواضيع`, isB]].forEach(([k, label, on]) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.className = on ? 'on' : ''; b.dataset.k = k;
+      b.onclick = () => {
+        if (k === 'all') sel = null;
+        else if (k === 'b') sel = new Set(ids);
+        else if (isAll || isB) sel = new Set(['a']);          // «الكلام المنوّع» alone
+        else { sel.has('a') ? sel.delete('a') : sel.add('a'); if (!sel.size) sel = null; } // add/remove it next to picked topics
+        commit();
+      };
+      pre.appendChild(b);
+    });
+    const ch = document.getElementById('chips'); ch.innerHTML = '';
+    info.topics.forEach((t) => {
+      const b = document.createElement('button'); b.type = 'button'; b.dataset.k = t.id;
+      b.textContent = t.title; b.className = !isAll && sel.has(t.id) ? 'on' : '';
+      b.onclick = () => { if (isAll) sel = new Set(); sel.has(t.id) ? sel.delete(t.id) : sel.add(t.id); if (!sel.size) sel = null; commit(); };
+      ch.appendChild(b);
+    });
+  }
+  function commit() {
+    const ids = window.__fillerInfo.topics.map((t) => t.id);
+    if (sel && sel.has('a') && ids.every((i) => sel.has(i))) sel = null;
+    window.setFillerChoice && window.setFillerChoice(sel ? [...sel] : 'all');
+    renderPick();
+  }
+  function initPick() { const c = window.getFillerChoice ? window.getFillerChoice() : 'all'; sel = c === 'all' ? null : new Set(c); renderPick(); }
+  if (window.__fillerInfo) initPick(); else addEventListener('lammoa:filler-ready', initPick, { once: true });
+
+  let started = false;
+  const startEl = document.getElementById('start');
+  document.getElementById('topicsBtn').addEventListener('click', () => {
+    startEl.classList.add('again'); document.getElementById('go').textContent = 'تم ✓'; startEl.style.display = ''; document.body.classList.add('starting');
+  });
   async function start() {
+    startEl.style.display = 'none'; document.body.classList.remove('starting');
+    if (started) return;
+    started = true;
     window.unlockAudio();
     try { if (!document.fullscreenElement && document.documentElement.requestFullscreen && !qs.has('nofs')) await document.documentElement.requestFullscreen({ navigationUI: 'hide' }); } catch {}
     await keepAwake();
-    document.getElementById('start').style.display = 'none';
     window.startMic && window.startMic();
     window.startFiller && window.startFiller();
     const micOn = (qs.get('mic') || '').toLowerCase() !== 'off';
     showBubble({ user: '', text: micOn ? 'جاهزة! كلّمني وأنا أسمعك، واكتبوا تعليقاتكم.' : 'جاهزة! اكتبوا تعليقاتكم وأنا أرد عليكم.', durationMs: 1500 }); hideBubbleSoon(5000);
   }
-  document.getElementById('start').addEventListener('click', start);
+  document.getElementById('go').addEventListener('click', start);
   if (qs.has('autostart')) start();
 </script>
 </body>

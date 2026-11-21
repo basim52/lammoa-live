@@ -12,16 +12,19 @@ t('english reply caught', latinRatio('Hello my friend, how are you?') > 0.12);
 t('mixed english-heavy caught', latinRatio('أوكي so funny lol يا بطل') > 0.12);
 t('stripLatin removes english', !/[A-Za-z]/.test(stripLatin('هلا OMG والله lol حلو')), stripLatin('هلا OMG والله lol حلو'));
 
-const s1 = splitForTts('هلا والله! كيفك اليوم؟ وش سويت بالدوام؟');
-t('split into sentences, first short', s1.length >= 2 && s1[0].split(' ').length <= 6, JSON.stringify(s1));
-t('tiny first sentence merged', splitForTts('هلا! كيفك اليوم يا بطل؟')[0].includes('كيفك'));
-t('max 3 chunks', splitForTts('أ ب ج. د ه و. ز ح ط. ي ك ل. م ن س.').length <= 3);
-t('long single sentence split at comma', splitForTts('هذي جملة طويلة شوي وفيها كلام كثير، وبعدها يكمل الكلام لين آخر الجملة الطويلة').length === 2);
+const s1 = splitForTts('هلا والله يا أهل فرفشة كلكم! كيفكم اليوم؟ وش سويتوا بالدوام يا جماعة الخير؟');
+t('split at sentence end, first part >= 5 words', s1.length === 2 && s1[0].split(' ').length >= 5, JSON.stringify(s1));
+t('short reply stays whole', splitForTts('هلا! كيفك اليوم يا بطل؟').length === 1);
+t('max 2 chunks', splitForTts('أ ب ج د. ه و ز ح. ط ي ك ل. م ن س ع. ف ص ق ر.').length <= 2);
+t('never split mid-phrase at a comma', splitForTts('هذي جملة طويلة شوي وفيها كلام كثير، وبعدها يكمل الكلام لين آخر الجملة الطويلة').length === 1);
 
 const dir = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'public', 'filler');
 const man = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
 const total = man.clips.reduce((a, c) => a + c.d, 0);
-t('filler ≈30 min of speech', total > 28 * 60000 && total < 40 * 60000, (total / 60000).toFixed(1) + ' min');
+const setMin = (k) => man.clips.filter((c) => (c.set || 'a') === k).reduce((a, c) => a + c.d, 0) / 60000;
+t('filler set A (mixed) ≈30 min', setMin('a') > 28 && setMin('a') < 40, setMin('a').toFixed(1) + ' min');
+t('filler set B (topics) ≈30 min', setMin('b') > 26 && setMin('b') < 36, setMin('b').toFixed(1) + ' min');
+t('filler set B has 10 topics ≈3 min each', (() => { const m = {}; man.clips.filter((c) => c.set === 'b').forEach((c) => { m[c.cat] = (m[c.cat] || 0) + c.d; }); const v = Object.values(m); return v.length === 10 && v.every((x) => x > 2.4 * 60000 && x < 3.6 * 60000); })());
 t('filler files exist', man.clips.every((c) => fs.existsSync(path.join(dir, c.f))));
 t('filler text all Arabic', man.clips.every((c) => !/[A-Za-z]/.test(c.t)));
 t('filler passes topic filter', man.clips.every((c) => !checkText(c.t)), (man.clips.find((c) => checkText(c.t)) || {}).t || '');

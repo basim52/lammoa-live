@@ -9,9 +9,14 @@ const imgOpen = $('imgOpen'), imgClosed = $('imgClosed'), bodyEl = $('body');
 fetch('/api/config').then(r => r.json()).then(c => { imgOpen.src = c.open; imgClosed.src = c.closed; $('tag').textContent = c.name; });
 
 // ---- audio ----
-let ctx, analyser, data, currentSrc = null, level = 0, talkingUntil = 0, fakeTalk = false;
+let ctx, analyser, limiter, data, currentSrc = null, level = 0, talkingUntil = 0, fakeTalk = false;
 function ensureCtx() {
-  if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)(); analyser = ctx.createAnalyser(); analyser.fftSize = 1024; data = new Uint8Array(analyser.fftSize); analyser.connect(ctx.destination); }
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)(); analyser = ctx.createAnalyser(); analyser.fftSize = 1024; data = new Uint8Array(analyser.fftSize);
+    // soft limiter so louder voice never clips on the tablet speaker
+    limiter = ctx.createDynamicsCompressor(); limiter.threshold.value = -3; limiter.knee.value = 6; limiter.ratio.value = 8; limiter.attack.value = 0.003; limiter.release.value = 0.15;
+    analyser.connect(limiter); limiter.connect(ctx.destination);
+  }
   if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
   return ctx;
 }
@@ -31,7 +36,10 @@ async function playUrl(url, b64) {
   const buf = b64 ? b64ToBuf(b64) : await (await fetch(url)).arrayBuffer();
   const audio = await ctx.decodeAudioData(buf);
   stopAudio();
-  const src = ctx.createBufferSource(); src.buffer = audio; src.connect(analyser); src.start();
+  const src = ctx.createBufferSource(); src.buffer = audio;
+  // Edge voice comes out quieter than Gemini's: lift it a bit (filler files are already loudness-normalized)
+  const gain = ctx.createGain(); gain.gain.value = (/\.mp3$/.test(url || '') && !/^\/filler\//.test(url || '')) ? 1.6 : 1;
+  src.connect(gain); gain.connect(analyser); src.start();
   currentSrc = src;
   window.__lastAudio = { url, duration: audio.duration, startedAt: Date.now(), ctxState: ctx.state };
   return new Promise(res => { src.onended = () => res(); });
@@ -73,7 +81,7 @@ async function speak(m) {
       if (my !== speakSeq) return false;
       const part = await waitPart(m.sid, i, 12000);
       if (my !== speakSeq) return false;
-      if (part && part.audioUrl) { try { await playUrl(part.audioUrl, part.audioB64); } catch (e) { console.warn('part failed', e); } }
+      if (part && part.audioUrl) { await new Promise((r) => setTimeout(r, 120)); try { await playUrl(part.audioUrl, part.audioB64); } catch (e) { console.warn('part failed', e); } }
     }
   } else { fakeTalk = true; await new Promise(r => setTimeout(r, m.durationMs || 3000)); }
   if (my !== speakSeq) return false; // a newer line took over

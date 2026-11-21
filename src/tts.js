@@ -51,7 +51,7 @@ export async function warmEdge() { if (Date.now() - edgeUsedAt < 120000 && edge)
 async function edgeClient() {
   if (edge) return edge;
   const c = new MsEdgeTTS({ connectionTimeoutMs: 8000, synthesisTimeoutMs: 15000 });
-  await c.setMetadata(config.edgeVoice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+  await c.setMetadata(config.edgeVoice, config.edgeFormat);
   edge = c; return c;
 }
 export async function synthEdge(text, { attempt = 0 } = {}) {
@@ -66,8 +66,8 @@ export async function synthEdge(text, { attempt = 0 } = {}) {
     const audio = Buffer.concat(parts);
     edgeUsedAt = Date.now();
     if (audio.length < 500) throw new Error('edge: empty audio');
-    // 48 kbit/s CBR mp3
-    return { audio, wav: audio, mime: 'audio/mpeg', ext: 'mp3', durationMs: Math.round(audio.length * 8 / 48), engine: 'edge' };
+    const kbps = Number((config.edgeFormat.match(/(\d+)kbitrate/) || [])[1] || 48); // CBR mp3
+    return { audio, wav: audio, mime: 'audio/mpeg', ext: 'mp3', durationMs: Math.round(audio.length * 8 / kbps), engine: 'edge' };
   } catch (e) {
     try { edge && edge.close(); } catch {}
     edge = null;
@@ -123,15 +123,16 @@ function trimSilence(pcm, rate) {
   return pcm.subarray(a * 2, b * 2);
 }
 
-// Split a reply for TTS: first chunk short so audio starts early; the rest is synthesized in parallel.
+// Split a reply for TTS: only at sentence ends (never mid-phrase), at most 2 chunks, so the first
+// sentence can start playing while the rest is synthesized. Short replies stay in one piece.
 export function splitForTts(text) {
-  const parts = String(text).split(/(?<=[.!؟?…])\s+/).map((x) => x.trim()).filter(Boolean);
-  const out = [];
-  for (const p of parts) { if (out.length && out[out.length - 1].split(' ').length < 4) out[out.length - 1] += ' ' + p; else out.push(p); }
-  if (out.length === 1 && out[0].split(' ').length > 12) {
-    const m = out[0].match(/^(.{12,}?[،,])\s+(.+)$/);
-    if (m && m[2].split(' ').length >= 3) return [m[1], m[2]];
-  }
-  while (out.length > 3) { const last = out.pop(); out[out.length - 1] += ' ' + last; }
-  return out.length ? out : [String(text)];
+  const t = String(text).trim();
+  const wc = (x) => x.split(/\s+/).filter(Boolean).length;
+  if (wc(t) <= 10) return [t];
+  const parts = t.split(/(?<=[.!؟?…])\s+/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length < 2) return [t];
+  let first = parts[0], i = 1;
+  while (i < parts.length - 1 && wc(first) < 5) first += ' ' + parts[i++];
+  const rest = parts.slice(i).join(' ');
+  return rest && wc(rest) >= 2 ? [first, rest] : [t];
 }

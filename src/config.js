@@ -41,8 +41,9 @@ export const config = {
   ttsEngine: (env.TTS_ENGINE || 'edge').toLowerCase(), // edge (Edge first, Gemini fallback) | auto (Gemini first, Edge fallback) | gemini
   geminiCooldownMs: Number(env.GEMINI_TTS_COOLDOWN_MS || 15 * 60 * 1000),
   edgeVoice: env.EDGE_VOICE || 'ar-SA-ZariyahNeural',
-  edgePitch: env.EDGE_PITCH || '+12%',
-  edgeRate: env.EDGE_RATE || '+15%',
+  edgeFormat: env.EDGE_FORMAT || 'audio-24khz-96kbitrate-mono-mp3', // best format the free Edge endpoint accepts
+  edgePitch: env.EDGE_PITCH || '+2%',
+  edgeRate: env.EDGE_RATE || '+4%',
   replyIntervalMs: Number(env.REPLY_INTERVAL_MS || 7000),
   welcomeIntervalMs: Number(env.WELCOME_INTERVAL_MS || 45000),
   hasKey: Boolean(env.GEMINI_API_KEY),
