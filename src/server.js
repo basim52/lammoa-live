@@ -8,7 +8,7 @@ import { ROOT, config } from './config.js';
 import { EventQueue } from './queue.js';
 import { replyTo, rememberSpoken, rememberTurn, conversationState, resetConversation } from './brain.js';
 import { HearGate, transcribe } from './hear.js';
-import { synthesize } from './tts.js';
+import { synthesize, ttsState } from './tts.js';
 import { connectTikTok } from './tiktok.js';
 
 const DEMO = process.argv.includes('--demo') || process.env.DEMO === '1';
@@ -79,13 +79,13 @@ const server = http.createServer(async (req, res) => {
   if (needsAuth && !stageOk && !authed(req, url)) { res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('401: رابط لوحة التحكم يحتاج المفتاح السري ?token=...'); }
   if (p === '/control') return sendFile(res, path.join(PUBLIC, 'control.html'));
   if (p === '/api/config') return json(res, 200, { name: config.characterName, open: config.characterOpen, closed: config.characterClosed });
-  if (p === '/api/status') return json(res, 200, { micMode: currentMicMode(), conversation: conversationState(), demo: DEMO, paused, queue: queue.length, stats: queue.stats, tiktok: tiktokStatus, tiktokUser: currentTikTok, hasKey: config.hasKey, tts: config.ttsEnabled, voice: config.voice, logs: logs.slice(-40), lastSpoken });
+  if (p === '/api/status') return json(res, 200, { micMode: currentMicMode(), conversation: conversationState(), demo: DEMO, paused, queue: queue.length, stats: queue.stats, tiktok: tiktokStatus, tiktokUser: currentTikTok, hasKey: config.hasKey, tts: config.ttsEnabled, voice: config.voice, ttsEngine: config.ttsEngine, ttsLastEngine: ttsState.lastEngine, geminiTtsCooldownS: Math.max(0, Math.round((ttsState.geminiCooldownUntil - Date.now()) / 1000)), lastGeminiTtsError: ttsState.lastGeminiError, logs: logs.slice(-40), lastSpoken });
   if (p.startsWith('/audio/')) {
-    const id = p.slice(7).replace(/\.wav$/, '');
-    const buf = audioStore.get(id);
-    if (!buf) { res.writeHead(404); return res.end(); }
-    res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': buf.length, 'cache-control': 'no-store' });
-    return res.end(buf);
+    const id = p.slice(7).replace(/\.(wav|mp3)$/, '');
+    const a = audioStore.get(id);
+    if (!a) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'content-type': a.mime, 'content-length': a.buf.length, 'cache-control': 'no-store' });
+    return res.end(a.buf);
   }
   if (req.method === 'POST' && p === '/api/event') {
     const b = await readBody(req);
@@ -211,14 +211,14 @@ async function worker() {
       else reply = await replyTo(ev);
       const tBrain = Date.now() - started;
       let audioUrl = null; let durationMs = Math.max(2500, reply.text.length * 70); let ttsErr = null;
-      if (config.ttsEnabled && config.hasKey) {
+      if (config.ttsEnabled) {
         try {
-          const { wav, durationMs: d } = await synthesize(reply.text);
+          const { audio, mime, ext, durationMs: d } = await synthesize(reply.text);
           const id = crypto.randomBytes(6).toString('hex');
-          audioStore.set(id, wav);
+          audioStore.set(id, { buf: audio, mime });
           if (audioStore.size > 30) audioStore.delete(audioStore.keys().next().value);
-          if (SAVE_AUDIO) fs.writeFileSync(path.join(ROOT, 'audio', `${id}.wav`), wav);
-          audioUrl = `/audio/${id}.wav`; durationMs = d;
+          if (SAVE_AUDIO) fs.writeFileSync(path.join(ROOT, 'audio', `${id}.${ext}`), audio);
+          audioUrl = `/audio/${id}.${ext}`; durationMs = d;
         } catch (e) { ttsErr = e.message; log('[tts] failed, text-only:', e.message); }
       }
       skipCurrent = false;

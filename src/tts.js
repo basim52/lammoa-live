@@ -1,5 +1,6 @@
 // Gemini TTS -> WAV buffer (24 kHz mono 16-bit PCM). Key in header only.
 import { config, apiKey } from './config.js';
+import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 
 function pcmToWav(pcm, sampleRate = 24000, channels = 1, bits = 16) {
   const h = Buffer.alloc(44);
@@ -11,13 +12,57 @@ function pcmToWav(pcm, sampleRate = 24000, channels = 1, bits = 16) {
   return Buffer.concat([h, pcm]);
 }
 
+// Engines: Gemini TTS (voice Zephyr) first; if it fails or the key's quota is exhausted (429),
+// fall back to Microsoft Edge neural voice (no key). After a 429, Gemini is skipped for a while.
+let geminiCooldownUntil = 0;
+export const ttsState = { lastEngine: null, geminiCooldownUntil: 0, lastGeminiError: null };
 export async function synthesize(text) {
+  const engine = config.ttsEngine;
   let lastErr;
-  for (const model of config.ttsModels) {
-    try { return await synthOnce(text, model); } catch (e) { lastErr = e; }
+  const useGemini = engine === 'gemini' || (engine === 'auto' && config.hasKey && Date.now() >= geminiCooldownUntil);
+  if (useGemini) {
+    for (const model of config.ttsModels) {
+      try { const r = await synthOnce(text, model); ttsState.lastEngine = 'gemini'; return r; }
+      catch (e) {
+        lastErr = e; ttsState.lastGeminiError = e.message;
+        if (/HTTP 429/.test(e.message)) { geminiCooldownUntil = Date.now() + config.geminiCooldownMs; ttsState.geminiCooldownUntil = geminiCooldownUntil; break; }
+      }
+    }
+    if (engine === 'gemini') throw lastErr;
   }
-  throw lastErr;
+  try { const r = await synthEdge(text); ttsState.lastEngine = 'edge'; return r; }
+  catch (e) { throw new Error(`${lastErr ? lastErr.message + ' | ' : ''}edge: ${e.message}`); }
 }
+
+// ---- Microsoft Edge neural TTS (free, no key) ----
+let edge = null;
+async function edgeClient() {
+  if (edge) return edge;
+  const c = new MsEdgeTTS({ connectionTimeoutMs: 8000, synthesisTimeoutMs: 15000 });
+  await c.setMetadata(config.edgeVoice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+  edge = c; return c;
+}
+export async function synthEdge(text, { attempt = 0 } = {}) {
+  try {
+    const c = await edgeClient();
+    const { audioStream } = c.toStream(escapeXml(text), { pitch: config.edgePitch, rate: config.edgeRate });
+    const parts = [];
+    await Promise.race([
+      (async () => { for await (const ch of audioStream) parts.push(ch); })(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('edge timeout')), 15000)),
+    ]);
+    const audio = Buffer.concat(parts);
+    if (audio.length < 1000) throw new Error('edge: empty audio');
+    // 48 kbit/s CBR mp3
+    return { audio, wav: audio, mime: 'audio/mpeg', ext: 'mp3', durationMs: Math.round(audio.length * 8 / 48), engine: 'edge' };
+  } catch (e) {
+    try { edge && edge.close(); } catch {}
+    edge = null;
+    if (attempt < 1) return synthEdge(text, { attempt: attempt + 1 });
+    throw e;
+  }
+}
+function escapeXml(t) { return String(t).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c])); }
 
 async function synthOnce(text, model) {
   const key = apiKey();
@@ -45,7 +90,7 @@ async function synthOnce(text, model) {
     const rate = Number((mime.match(/rate=(\d+)/) || [])[1] || 24000);
     const pcm = trimSilence(Buffer.from(part.inlineData.data, 'base64'), rate);
     const wav = pcmToWav(pcm, rate);
-    return { wav, durationMs: Math.round((pcm.length / 2 / rate) * 1000) };
+    return { audio: wav, wav, mime: 'audio/wav', ext: 'wav', durationMs: Math.round((pcm.length / 2 / rate) * 1000), engine: 'gemini' };
   } catch (e) {
     if (e.name === 'AbortError') throw new Error(`Gemini TTS ${model} timeout`);
     throw e;

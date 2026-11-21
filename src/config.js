@@ -37,6 +37,11 @@ export const config = {
   hostName: (env.HOST_NAME || '').trim(),
   micMode: env.MIC_MODE || 'server',
   ttsEnabled: env.TTS_ENABLED !== '0',
+  ttsEngine: (env.TTS_ENGINE || 'auto').toLowerCase(), // auto | gemini | edge
+  geminiCooldownMs: Number(env.GEMINI_TTS_COOLDOWN_MS || 15 * 60 * 1000),
+  edgeVoice: env.EDGE_VOICE || 'ar-SA-ZariyahNeural',
+  edgePitch: env.EDGE_PITCH || '+12%',
+  edgeRate: env.EDGE_RATE || '+8%',
   replyIntervalMs: Number(env.REPLY_INTERVAL_MS || 7000),
   welcomeIntervalMs: Number(env.WELCOME_INTERVAL_MS || 45000),
   hasKey: Boolean(env.GEMINI_API_KEY),
