@@ -59,6 +59,23 @@
   @keyframes drift { from { transform:scale(1.02) translateX(-.8%); } to { transform:scale(1.06) translateX(.8%); } }
   body.scenes #wrap::before { content:''; position:absolute; inset:-10% -14% -4%; background:radial-gradient(closest-side, rgba(255,255,255,.5), rgba(255,255,255,0)); z-index:-1; pointer-events:none; }
   #stage { z-index:1; overflow:hidden; }
+  /* big title: لمّوعة + فرفشة (readable when a phone films the tablet) */
+  #title { position:fixed; top:1.2vh; left:0; right:0; z-index:3; text-align:center; pointer-events:none; line-height:1; direction:rtl; }
+  #title .name { display:block; font-family:Lalezar,sans-serif; font-size:19vmin; color:#FFC93C; -webkit-text-stroke:1.7vmin #0B2A6F; paint-order:stroke fill; text-shadow:0 .9vmin 0 #0B2A6F, 0 0 3.5vmin rgba(255,255,255,.85); letter-spacing:.01em; animation:titleBob 4s ease-in-out infinite; }
+  #title .brand { display:inline-block; margin-top:-.6vmin; font-family:Lalezar,sans-serif; font-size:6.6vmin; color:#fff; background:linear-gradient(90deg,var(--orange),var(--pink)); border:.6vmin solid #0B2A6F; border-radius:3vmin; padding:.6vmin 3.2vmin .2vmin; box-shadow:0 .6vmin 0 rgba(11,42,111,.35); }
+  @keyframes titleBob { 0%,100% { transform:translateY(0) rotate(-1deg); } 50% { transform:translateY(-.8vmin) rotate(1deg); } }
+  body.notitle #title { display:none; }
+  @media (orientation: portrait) {
+    body:not(.notitle) #stage { padding-top:27vmin; justify-content:flex-start; gap:2vmin; }
+    body:not(.notitle) #wrap { height:min(44vh, 72vw); }
+    body:not(.notitle) #bubbleZone { min-height:26vh; }
+  }
+  @media (orientation: landscape) {
+    #title { left:auto; right:2vw; width:56vw; top:2vh; }
+    #title .name { font-size:17vmin; }
+    #title .brand { font-size:6vmin; }
+    body:not(.notitle) #bubbleZone { padding-top:30vh; }
+  }
   #dot { position:fixed; bottom:1.5vmin; left:1.5vmin; width:1.6vmin; height:1.6vmin; border-radius:50%; background:#e33; opacity:.6; z-index:4; }
   body.online #dot { background:#2c4; opacity:.35; }
   #mic { position:fixed; bottom:1.2vmin; left:50%; transform:translateX(-50%); z-index:4; max-width:70vw; font-family:Tajawal,sans-serif; font-weight:800; font-size:3.2vmin; direction:rtl; pointer-events:none; }
@@ -74,11 +91,14 @@
   <div id="bubbleZone"><div id="bubble"><div id="tag">لمّوعة</div><div id="who"><span class="chip" id="user"></span><span id="comment"></span></div><div id="text"></div></div></div>
   <div id="wrap"><div id="char"><div id="body"><img id="imgOpen" alt=""><img id="imgClosed" class="closed" alt=""></div></div><div id="shadow"></div></div>
 </div>
+<div id="title"><span class="name">لمّوعة</span><span class="brand">فرفشة</span></div>
 <div id="dot" title="الاتصال"></div>
 <div id="start"><button id="go">اضغط للتشغيل</button><p>بعد الضغط: الشاشة تبقى شغالة، صوت لمّوعة يطلع من الجهاز، وهي تسمعك من المايك. ارفع الصوت، وإذا سألك المتصفح عن المايك اضغط «سماح».</p></div>
 <script src="/lammoa.js"></script>
 <script src="/mic.js"></script>
+<script src="/filler.js"></script>
 <script>
+  if (qs.has('notitle')) document.body.classList.add('notitle');
   // ---- location backgrounds: shuffle, cross-fade every few minutes (?bgmin=3), ?bg=cafe pins one ----
   (() => {
     const PLACES = ['majlis', 'cafe', 'studio', 'desert', 'city', 'garden'];
@@ -116,6 +136,7 @@
     await keepAwake();
     document.getElementById('start').style.display = 'none';
     window.startMic && window.startMic();
+    window.startFiller && window.startFiller();
     const micOn = (qs.get('mic') || '').toLowerCase() !== 'off';
     showBubble({ user: '', text: micOn ? 'جاهزة! كلّمني وأنا أسمعك، واكتبوا تعليقاتكم.' : 'جاهزة! اكتبوا تعليقاتكم وأنا أرد عليكم.', durationMs: 1500 }); hideBubbleSoon(5000);
   }

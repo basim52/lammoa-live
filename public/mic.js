@@ -30,7 +30,7 @@
   }
   async function sendText(text, via) {
     const j = await send('/api/hear', JSON.stringify({ text, via }), { 'content-type': 'application/json' });
-    if (j && j.ok) showHeard(j.text);
+    if (j && j.ok) { showHeard(j.text); dispatchEvent(new CustomEvent('lammoa:heard', { detail: j.text })); }
     window.__lastHeard = j;
   }
 
@@ -67,7 +67,7 @@
 
   // ================= server mode: voice activity detection + WAV upload =================
   let stream = null, srcNode = null, proc = null, sink = null;
-  let inUtt = false, buf = [], pre = [], loud = 0, voicedMs = 0, silentMs = 0, noise = 0.004, uploading = 0;
+  let sttErrors = 0, inUtt = false, buf = [], pre = [], loud = 0, voicedMs = 0, silentMs = 0, noise = 0.004, uploading = 0;
   async function startServer() {
     ui('wait');
     try {
@@ -93,7 +93,7 @@
     if (stream) stream.getTracks().forEach((t) => t.stop());
     stream = srcNode = proc = sink = null; resetUtt();
   }
-  function resetUtt() { inUtt = false; buf = []; loud = 0; voicedMs = 0; silentMs = 0; }
+  function resetUtt() { window.__micBusy = false; inUtt = false; buf = []; loud = 0; voicedMs = 0; silentMs = 0; }
   function onFrame(x) {
     const frame = new Float32Array(x);
     let s = 0; for (let i = 0; i < frame.length; i++) s += frame[i] * frame[i];
@@ -103,13 +103,13 @@
     const thr = Math.max(0.012, noise * 3.5);
     if (!inUtt) {
       pre.push(frame); if (pre.length > 8) pre.shift();
-      if (rms > thr) { if (++loud >= 3) { inUtt = true; buf = pre.slice(); pre = []; voicedMs = loud * fms; silentMs = 0; } }
+      if (rms > thr) { if (++loud >= 3) { inUtt = true; window.__micBusy = true; dispatchEvent(new CustomEvent('lammoa:heard-start')); buf = pre.slice(); pre = []; voicedMs = loud * fms; silentMs = 0; } }
       else { loud = 0; noise = noise * 0.97 + rms * 0.03; }
       return;
     }
     buf.push(frame);
     if (rms > thr * 0.6) { voicedMs += fms; silentMs = 0; } else silentMs += fms;
-    if (silentMs >= 900 || buf.length * fms >= 12000) {
+    if (silentMs >= 650 || buf.length * fms >= 12000) {
       const take = buf, v = voicedMs; resetUtt();
       if (v >= 400) upload(take, ctx.sampleRate);
     }
@@ -134,7 +134,12 @@
     try {
       const j = await send('/api/hear-audio', toWav(frames, rate), { 'content-type': 'audio/wav' });
       window.__lastHeard = j;
-      if (j && j.ok) showHeard(j.text); else ui(speaking ? 'paused' : 'listen');
+      if (j && j.ok) { sttErrors = 0; showHeard(j.text); dispatchEvent(new CustomEvent('lammoa:heard', { detail: j.text })); }
+      else {
+        ui(speaking ? 'paused' : 'listen');
+        // server speech-to-text down (e.g. key quota): switch to Chrome's own recognition if available
+        if (j && j.reason === 'stt-error' && ++sttErrors >= 2 && SR && !urlMode) { console.warn('server STT failing, switching to Web Speech'); serverMode = 'web'; apply(); }
+      }
     } catch (e) { console.warn('hear upload', e); ui('listen'); }
     finally { uploading--; }
   }

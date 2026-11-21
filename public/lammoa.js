@@ -25,9 +25,10 @@ document.addEventListener('click', ensureCtx);
 
 function stopAudio() { try { currentSrc && currentSrc.stop(); } catch {} currentSrc = null; }
 
-async function playUrl(url) {
+function b64ToBuf(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; }
+async function playUrl(url, b64) {
   ensureCtx();
-  const buf = await (await fetch(url)).arrayBuffer();
+  const buf = b64 ? b64ToBuf(b64) : await (await fetch(url)).arrayBuffer();
   const audio = await ctx.decodeAudioData(buf);
   stopAudio();
   const src = ctx.createBufferSource(); src.buffer = audio; src.connect(analyser); src.start();
@@ -48,7 +49,7 @@ function showBubble(m) {
   $('text').innerHTML = words.map(w => `<span class="w">${w.replace(/[<&>]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</span>`).join(' ');
   $('bubble').classList.add('show');
   const spans = [...document.querySelectorAll('#text .w')];
-  const per = Math.max(90, (m.durationMs || 3000) / Math.max(1, spans.length));
+  const per = Math.max(90, (m.estTotalMs || m.durationMs || 3000) / Math.max(1, spans.length));
   let i = 0; spans[0] && spans[0].classList.add('on');
   wordTimer = setInterval(() => { i++; if (i >= spans.length) return clearInterval(wordTimer); spans[i].classList.add('on'); }, per);
 }
@@ -56,26 +57,38 @@ function hideBubbleSoon(ms = 2500) { clearTimeout(hideTimer); hideTimer = setTim
 
 function setSpeaking(v) { window.__speaking = v; dispatchEvent(new CustomEvent('lammoa:speaking', { detail: v })); }
 let speakSeq = 0;
+const partStore = new Map(), partWaiters = new Map();
+function gotPart(p) { const k = p.sid + ':' + p.index; partStore.set(k, p); if (partStore.size > 30) partStore.delete(partStore.keys().next().value); const w = partWaiters.get(k); if (w) { partWaiters.delete(k); w(p); } }
+function waitPart(sid, i, ms) { const k = sid + ':' + i; if (partStore.has(k)) return Promise.resolve(partStore.get(k)); return new Promise((res) => { partWaiters.set(k, res); setTimeout(() => { if (partWaiters.get(k) === res) { partWaiters.delete(k); res(null); } }, ms); }); }
 async function speak(m) {
   const my = ++speakSeq;
   setSpeaking(true);
   showBubble(m);
   burst(28);
   if (m.audioUrl) {
-    try { fakeTalk = false; await playUrl(m.audioUrl); }
+    try { fakeTalk = false; await playUrl(m.audioUrl, m.audioB64); }
     catch (e) { console.warn('audio failed, text-only', e); fakeTalk = true; await new Promise(r => setTimeout(r, m.durationMs)); }
+    // remaining sentences (synthesized in parallel on the server) arrive as speak-part messages
+    for (let i = 1; i < (m.parts || 1); i++) {
+      if (my !== speakSeq) return false;
+      const part = await waitPart(m.sid, i, 12000);
+      if (my !== speakSeq) return false;
+      if (part && part.audioUrl) { try { await playUrl(part.audioUrl, part.audioB64); } catch (e) { console.warn('part failed', e); } }
+    }
   } else { fakeTalk = true; await new Promise(r => setTimeout(r, m.durationMs || 3000)); }
-  if (my !== speakSeq) return; // a newer line took over
+  if (my !== speakSeq) return false; // a newer line took over
   fakeTalk = false;
   setSpeaking(false);
   document.querySelectorAll('#text .w').forEach(s => s.classList.add('on'));
   hideBubbleSoon();
+  return true;
 }
 
 // ---- websocket ----
 function connect() {
   const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
-  ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === 'speak') { window.__lastMsg = m; speak(m); } if (m.type === 'stop') { stopAudio(); hideBubbleSoon(300); } if (m.type === 'hello') dispatchEvent(new CustomEvent('lammoa:hello', { detail: m })); if (m.type === 'mic') dispatchEvent(new CustomEvent('lammoa:mic', { detail: m.mode })); };
+  window.__ws = ws;
+  ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === 'speak') { window.__lastMsg = m; dispatchEvent(new CustomEvent('lammoa:live')); speak(m); } if (m.type === 'speak-part') gotPart(m); if (m.type === 'stop') { stopAudio(); hideBubbleSoon(300); } if (m.type === 'hello') dispatchEvent(new CustomEvent('lammoa:hello', { detail: m })); if (m.type === 'mic') dispatchEvent(new CustomEvent('lammoa:mic', { detail: m.mode })); if (m.type === 'filler') dispatchEvent(new CustomEvent('lammoa:filler', { detail: m.on })); };
   ws.onopen = () => document.body.classList.add('online');
   ws.onclose = () => { document.body.classList.remove('online'); setTimeout(connect, 1500); };
 }

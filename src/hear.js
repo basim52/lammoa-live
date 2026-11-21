@@ -41,19 +41,21 @@ export async function transcribe(wav) {
   const body = {
     contents: [{ role: 'user', parts: [
       { inlineData: { mimeType: 'audio/wav', data: Buffer.from(wav).toString('base64') } },
-      { text: 'اكتب الكلام المنطوق في هذا المقطع حرفياً بالحروف العربية كما قيل (غالباً لهجة سعودية/خليجية). المتكلم يكلم شخصية كرتونية اسمها «لمّوعة» في بث «فرفشة»، فإذا سمعت اسم يشبهها اكتبه «لموعة». اكتب النص فقط بدون أي شرح أو علامات. إذا ما فيه كلام بشري واضح (صمت، ضجة، صفارة أو نغمة، موسيقى، كلام غير مفهوم) اكتب فقط: <empty>' },
+      { text: 'اكتب الكلام المنطوق في هذا المقطع حرفياً بالحروف العربية كما قيل (غالباً لهجة سعودية/خليجية). المتكلم يكلم شخصية كرتونية اسمها «لمّوعة» في بث «فرفشة»، فإذا سمعت اسم يشبهها اكتبه «لموعة». إذا قال كلمات إنجليزية اكتبها بالحروف العربية كما تُنطق (مثل: أوكي، لايك). اكتب النص فقط بدون أي شرح أو علامات. إذا ما فيه كلام بشري واضح (صمت، ضجة، صفارة أو نغمة، موسيقى، كلام غير مفهوم) اكتب فقط: <empty>' },
     ] }],
-    generationConfig: { temperature: 0, maxOutputTokens: 200 },
+    generationConfig: { temperature: 0, maxOutputTokens: 160, thinkingConfig: { thinkingLevel: 'minimal' } },
   };
   let lastErr;
-  for (const model of config.sttModels) {
+  const tries = [];
+  for (const model of config.sttModels) { tries.push([model, body]); tries.push([model, { ...body, generationConfig: { temperature: 0, maxOutputTokens: 160 } }]); }
+  for (const [model, b] of tries) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 12000);
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: 'POST', signal: ctrl.signal,
         headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify(body),
+        body: JSON.stringify(b),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(`Gemini STT ${model} HTTP ${res.status}: ${j?.error?.status || ''}`);
@@ -61,6 +63,7 @@ export async function transcribe(wav) {
       return cleanTranscript(text);
     } catch (e) {
       lastErr = e.name === 'AbortError' ? new Error(`Gemini STT ${model} timeout`) : e;
+      if (b === body && !/HTTP 400/.test(lastErr.message)) tries.splice(tries.findIndex((x) => x[1] !== body && x[0] === model), 1); // only retry without thinking on 400
     } finally { clearTimeout(t); }
   }
   throw lastErr;

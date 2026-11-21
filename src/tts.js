@@ -19,6 +19,16 @@ export const ttsState = { lastEngine: null, geminiCooldownUntil: 0, lastGeminiEr
 export async function synthesize(text) {
   const engine = config.ttsEngine;
   let lastErr;
+  if (engine === 'edge') {
+    try { const r = await synthEdge(text); ttsState.lastEngine = 'edge'; return r; }
+    catch (e) { lastErr = e; }
+    if (!config.hasKey || Date.now() < geminiCooldownUntil) throw lastErr;
+    for (const model of config.ttsModels) {
+      try { const r = await synthOnce(text, model); ttsState.lastEngine = 'gemini'; return r; }
+      catch (e2) { ttsState.lastGeminiError = e2.message; if (/HTTP 429/.test(e2.message)) { geminiCooldownUntil = ttsState.geminiCooldownUntil = Date.now() + config.geminiCooldownMs; break; } }
+    }
+    throw lastErr;
+  }
   const useGemini = engine === 'gemini' || (engine === 'auto' && config.hasKey && Date.now() >= geminiCooldownUntil);
   if (useGemini) {
     for (const model of config.ttsModels) {
@@ -108,4 +118,17 @@ function trimSilence(pcm, rate) {
   const pad = Math.floor(rate * 0.15);
   a = Math.max(0, a - pad); b = Math.min(n, b + win + pad);
   return pcm.subarray(a * 2, b * 2);
+}
+
+// Split a reply for TTS: first chunk short so audio starts early; the rest is synthesized in parallel.
+export function splitForTts(text) {
+  const parts = String(text).split(/(?<=[.!؟?…])\s+/).map((x) => x.trim()).filter(Boolean);
+  const out = [];
+  for (const p of parts) { if (out.length && out[out.length - 1].split(' ').length < 4) out[out.length - 1] += ' ' + p; else out.push(p); }
+  if (out.length === 1 && out[0].split(' ').length > 12) {
+    const m = out[0].match(/^(.{12,}?[،,])\s+(.+)$/);
+    if (m && m[2].split(' ').length >= 3) return [m[1], m[2]];
+  }
+  while (out.length > 3) { const last = out.pop(); out[out.length - 1] += ' ' + last; }
+  return out.length ? out : [String(text)];
 }

@@ -8,7 +8,7 @@ import { ROOT, config } from './config.js';
 import { EventQueue } from './queue.js';
 import { replyTo, rememberSpoken, rememberTurn, conversationState, resetConversation } from './brain.js';
 import { HearGate, transcribe } from './hear.js';
-import { synthesize, ttsState } from './tts.js';
+import { synthesize, ttsState, splitForTts } from './tts.js';
 import { connectTikTok } from './tiktok.js';
 
 const DEMO = process.argv.includes('--demo') || process.env.DEMO === '1';
@@ -23,6 +23,7 @@ function log(...a) {
 }
 
 const queue = new EventQueue({ welcomeIntervalMs: config.welcomeIntervalMs });
+{ const push = queue.push.bind(queue); queue.push = (ev) => { const r = push(ev); if (r.ok) setImmediate(nudge); return r; }; }
 const audioStore = new Map(); // id -> wav buffer (last 30)
 let paused = false;
 let skipCurrent = false;
@@ -45,12 +46,13 @@ function stageAuthed(req) {
 const hearGate = new HearGate();
 let sttInFlight = 0; const sttTimes = [];
 let micMode = null; // 'server' | 'web' | 'off' (null = config default)
+let fillerOn = true; let fillerSeenAt = 0; // stage reports while it plays pre-recorded filler
 const IDLE_MS = Number(process.env.IDLE_MS ?? 90000);
 let lastActivity = Date.now();
 let tiktokStatus = config.tiktokUsername ? 'connecting' : 'not-configured';
 
 // ---------- HTTP ----------
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.woff2': 'font/woff2', '.json': 'application/json', '.svg': 'image/svg+xml' };
+const MIME = { '.mp3': 'audio/mpeg', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.woff2': 'font/woff2', '.json': 'application/json', '.svg': 'image/svg+xml' };
 function readBody(req) {
   return new Promise((res) => { let b = ''; req.on('data', (c) => { b += c; if (b.length > 1e5) req.destroy(); }); req.on('end', () => { try { res(JSON.parse(b || '{}')); } catch { res({}); } }); });
 }
@@ -79,7 +81,7 @@ const server = http.createServer(async (req, res) => {
   if (needsAuth && !stageOk && !authed(req, url)) { res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('401: رابط لوحة التحكم يحتاج المفتاح السري ?token=...'); }
   if (p === '/control') return sendFile(res, path.join(PUBLIC, 'control.html'));
   if (p === '/api/config') return json(res, 200, { name: config.characterName, open: config.characterOpen, closed: config.characterClosed });
-  if (p === '/api/status') return json(res, 200, { micMode: currentMicMode(), conversation: conversationState(), demo: DEMO, paused, queue: queue.length, stats: queue.stats, tiktok: tiktokStatus, tiktokUser: currentTikTok, hasKey: config.hasKey, tts: config.ttsEnabled, voice: config.voice, ttsEngine: config.ttsEngine, ttsLastEngine: ttsState.lastEngine, geminiTtsCooldownS: Math.max(0, Math.round((ttsState.geminiCooldownUntil - Date.now()) / 1000)), lastGeminiTtsError: ttsState.lastGeminiError, logs: logs.slice(-40), lastSpoken });
+  if (p === '/api/status') return json(res, 200, { fillerOn, fillerPlayingRecently: Date.now() - fillerSeenAt < 60000, micMode: currentMicMode(), conversation: conversationState(), demo: DEMO, paused, queue: queue.length, stats: queue.stats, tiktok: tiktokStatus, tiktokUser: currentTikTok, hasKey: config.hasKey, tts: config.ttsEnabled, voice: config.voice, ttsEngine: config.ttsEngine, ttsLastEngine: ttsState.lastEngine, geminiTtsCooldownS: Math.max(0, Math.round((ttsState.geminiCooldownUntil - Date.now()) / 1000)), lastGeminiTtsError: ttsState.lastGeminiError, logs: logs.slice(-40), lastSpoken });
   if (p.startsWith('/audio/')) {
     const id = p.slice(7).replace(/\.(wav|mp3)$/, '');
     const a = audioStore.get(id);
@@ -145,6 +147,7 @@ const server = http.createServer(async (req, res) => {
     if (b.action === 'skip') { skipCurrent = true; broadcast({ type: 'stop' }); }
     if (b.action === 'clear') queue.items = [];
     if (b.action === 'forget') resetConversation();
+    if (b.action === 'filler' && typeof b.on === 'boolean') { fillerOn = b.on; saveState({ ...loadState(), fillerOn }); broadcast({ type: 'filler', on: fillerOn }); }
     if (b.action === 'mic' && ['server', 'web', 'off', 'default'].includes(b.mode)) {
       micMode = b.mode === 'default' ? null : b.mode;
       saveState({ ...loadState(), micMode });
@@ -173,7 +176,10 @@ function broadcast(msg) {
   for (const c of wss?.clients || []) if (c.readyState === 1) c.send(s);
 }
 function currentMicMode() { return micMode || config.micMode; }
-wss.on('connection', (ws) => { ws.send(JSON.stringify({ type: 'hello', name: config.characterName, stageKey: STAGE_KEY, micMode: currentMicMode() })); });
+wss.on('connection', (ws) => {
+  ws.send(JSON.stringify({ type: 'hello', name: config.characterName, stageKey: STAGE_KEY, micMode: currentMicMode(), filler: fillerOn }));
+  ws.on('message', (d) => { try { const m = JSON.parse(String(d).slice(0, 200)); if (m.type === 'filler-on') fillerSeenAt = Date.now(); } catch {} });
+});
 
 // ---------- TikTok (can be changed at runtime from the control page) ----------
 const STATE_FILE = process.env.STATE_FILE || path.join(ROOT, 'state.json');
@@ -195,13 +201,17 @@ function startTikTok(username) {
 
 // ---------- Worker ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let wake = null; // resolves the worker's idle wait as soon as something is queued
+function nudge() { if (wake) { const w = wake; wake = null; w(); } }
+const idleWait = (ms) => new Promise((r) => { wake = r; setTimeout(() => { if (wake === r) wake = null; r(); }, ms); });
+
 async function worker() {
   for (;;) {
-    if (!paused && queue.length === 0 && IDLE_MS > 0 && Date.now() - lastActivity > IDLE_MS && wss.clients.size > 0) {
+    if (!paused && queue.length === 0 && IDLE_MS > 0 && Date.now() - lastActivity > IDLE_MS && wss.clients.size > 0 && Date.now() - fillerSeenAt > 60000) {
       lastActivity = Date.now();
       queue.push({ type: 'idle', user: '', text: '' });
     }
-    if (paused || queue.length === 0) { await sleep(250); continue; }
+    if (paused || queue.length === 0) { await idleWait(250); continue; }
     const ev = queue.next();
     if (!ev) continue;
     const started = Date.now();
@@ -211,24 +221,44 @@ async function worker() {
       else reply = await replyTo(ev);
       const tBrain = Date.now() - started;
       let audioUrl = null; let durationMs = Math.max(2500, reply.text.length * 70); let ttsErr = null;
-      if (config.ttsEnabled) {
-        try {
-          const { audio, mime, ext, durationMs: d } = await synthesize(reply.text);
-          const id = crypto.randomBytes(6).toString('hex');
-          audioStore.set(id, { buf: audio, mime });
-          if (audioStore.size > 30) audioStore.delete(audioStore.keys().next().value);
-          if (SAVE_AUDIO) fs.writeFileSync(path.join(ROOT, 'audio', `${id}.${ext}`), audio);
-          audioUrl = `/audio/${id}.${ext}`; durationMs = d;
-        } catch (e) { ttsErr = e.message; log('[tts] failed, text-only:', e.message); }
+      const sid = crypto.randomBytes(4).toString('hex');
+      const chunks = config.ttsEnabled ? splitForTts(reply.text) : [];
+      const synths = chunks.map((t) => synthesize(t).catch((e) => ({ error: e })));
+      const store = (r) => {
+        const id = crypto.randomBytes(6).toString('hex');
+        audioStore.set(id, { buf: r.audio, mime: r.mime });
+        if (audioStore.size > 40) audioStore.delete(audioStore.keys().next().value);
+        if (SAVE_AUDIO) fs.writeFileSync(path.join(ROOT, 'audio', `${id}.${r.ext}`), r.audio);
+        return { audioUrl: `/audio/${id}.${r.ext}`, audioB64: r.audio.length < 300000 ? r.audio.toString('base64') : undefined, mime: r.mime };
+      };
+      let first = null;
+      if (synths.length) {
+        const r = await synths[0];
+        if (r.error) { ttsErr = r.error.message; log('[tts] failed, text-only:', r.error.message); }
+        else { first = store(r); audioUrl = first.audioUrl; durationMs = r.durationMs; }
       }
+      const firstText = chunks[0] || reply.text;
+      const estTotal = first ? Math.round(durationMs * reply.text.length / Math.max(1, firstText.length)) : durationMs;
       skipCurrent = false;
-      const msg = { type: 'speak', eventType: ev.type, heard: ev.type === 'host' ? ev.text : undefined, user: (ev.type === 'say' || ev.type === 'idle' || ev.type === 'host') ? '' : ev.user, comment: ev.type === 'chat' ? ev.text : (ev.type === 'gift' ? `🎁 ${ev.gift || ''}${ev.count > 1 ? ' ×' + ev.count : ''}` : ''), text: reply.text, source: reply.source, audioUrl, durationMs };
+      const msg = { type: 'speak', sid, eventType: ev.type, heard: ev.type === 'host' ? ev.text : undefined, user: (ev.type === 'say' || ev.type === 'idle' || ev.type === 'host') ? '' : ev.user, comment: ev.type === 'chat' ? ev.text : (ev.type === 'gift' ? `🎁 ${ev.gift || ''}${ev.count > 1 ? ' ×' + ev.count : ''}` : ''), text: reply.text, source: reply.source, audioUrl, audioB64: first?.audioB64, mime: first?.mime, durationMs, estTotalMs: estTotal, parts: first ? chunks.length : 1 };
+      const tFirst = Date.now() - started;
       rememberSpoken(reply.text);
-      lastSpoken = { ...msg, brainMs: tBrain, totalMs: Date.now() - started, ttsError: ttsErr, blocked: reply.blocked || null };
       broadcast(msg);
-      log(`[out] (${reply.source}${reply.blocked ? ':' + reply.blocked.category : ''}, brain ${tBrain}ms, total ${Date.now() - started}ms, audio ${audioUrl ? Math.round(durationMs / 100) / 10 + 's' : 'none'}) ${reply.text}`);
+      const speakAt = Date.now();
+      let total = durationMs;
+      if (first) {
+        for (let i = 1; i < synths.length; i++) {
+          const r = await synths[i];
+          if (r.error) { broadcast({ type: 'speak-part', sid, index: i, durationMs: 0 }); continue; }
+          const a = store(r); total += r.durationMs;
+          broadcast({ type: 'speak-part', sid, index: i, ...a, durationMs: r.durationMs });
+        }
+      }
+      durationMs = total;
+      lastSpoken = { ...msg, audioB64: undefined, durationMs: total, brainMs: tBrain, firstAudioMs: tFirst, totalMs: tFirst, ttsError: ttsErr, blocked: reply.blocked || null };
+      log(`[out] (${reply.source}${reply.blocked ? ':' + reply.blocked.category : ''}, brain ${tBrain}ms, first audio ${tFirst}ms, parts ${msg.parts}, audio ${audioUrl ? Math.round(total / 100) / 10 + 's' : 'none'}) ${reply.text}`);
       // wait for speech to finish + breathing gap, honoring min interval
-      const speechEnd = Date.now() + durationMs + 1200;
+      const speechEnd = speakAt + durationMs + (ev.type === 'host' ? 500 : 1200);
       const waitUntil = Math.max(started + config.replyIntervalMs, speechEnd);
       // a conversation turn from the streamer doesn't wait for the comment interval
       while (Date.now() < waitUntil && !skipCurrent && !(Date.now() >= speechEnd && queue.items[0]?.type === 'host')) await sleep(100);
@@ -245,6 +275,7 @@ server.listen(config.port, config.host, () => {
   log(`لمّوعة شغالة: stage ${base}/stage  overlay ${base}/overlay  control ${base}/control${CONTROL_TOKEN ? '?token=' + CONTROL_TOKEN : ''}`);
   log(`Gemini key: ${config.hasKey ? 'loaded' : 'MISSING (text fallback only)'} | text=${config.textModels.join('|')} tts=${config.ttsModels.join('|')} voice=${config.voice}`);
   micMode = loadState().micMode || null;
+  if (typeof loadState().fillerOn === 'boolean') fillerOn = loadState().fillerOn;
   log(`Mic (streamer conversation): ${currentMicMode()}`);
   const saved = loadState().tiktokUsername;
   if (DEMO) { tiktokStatus = 'demo-mode'; log('Demo mode: TikTok not connected; use the control page.'); }
