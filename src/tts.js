@@ -45,7 +45,9 @@ export async function synthesize(text) {
 }
 
 // ---- Microsoft Edge neural TTS (free, no key) ----
-let edge = null;
+let edge = null; let edgeUsedAt = 0;
+// Keep the Edge connection warm so the first reply after a quiet spell doesn't pay the connect cost.
+export async function warmEdge() { if (Date.now() - edgeUsedAt < 120000 && edge) return; try { await synthEdge('هلا'); } catch {} }
 async function edgeClient() {
   if (edge) return edge;
   const c = new MsEdgeTTS({ connectionTimeoutMs: 8000, synthesisTimeoutMs: 15000 });
@@ -62,7 +64,8 @@ export async function synthEdge(text, { attempt = 0 } = {}) {
       new Promise((_, rej) => setTimeout(() => rej(new Error('edge timeout')), 15000)),
     ]);
     const audio = Buffer.concat(parts);
-    if (audio.length < 1000) throw new Error('edge: empty audio');
+    edgeUsedAt = Date.now();
+    if (audio.length < 500) throw new Error('edge: empty audio');
     // 48 kbit/s CBR mp3
     return { audio, wav: audio, mime: 'audio/mpeg', ext: 'mp3', durationMs: Math.round(audio.length * 8 / 48), engine: 'edge' };
   } catch (e) {

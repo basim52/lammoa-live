@@ -8,7 +8,7 @@ import { ROOT, config } from './config.js';
 import { EventQueue } from './queue.js';
 import { replyTo, rememberSpoken, rememberTurn, conversationState, resetConversation } from './brain.js';
 import { HearGate, transcribe } from './hear.js';
-import { synthesize, ttsState, splitForTts } from './tts.js';
+import { synthesize, ttsState, splitForTts, warmEdge } from './tts.js';
 import { connectTikTok } from './tiktok.js';
 
 const DEMO = process.argv.includes('--demo') || process.env.DEMO === '1';
@@ -177,6 +177,7 @@ function broadcast(msg) {
 }
 function currentMicMode() { return micMode || config.micMode; }
 wss.on('connection', (ws) => {
+  if (config.ttsEngine === 'edge') warmEdge();
   ws.send(JSON.stringify({ type: 'hello', name: config.characterName, stageKey: STAGE_KEY, micMode: currentMicMode(), filler: fillerOn }));
   ws.on('message', (d) => { try { const m = JSON.parse(String(d).slice(0, 200)); if (m.type === 'filler-on') fillerSeenAt = Date.now(); } catch {} });
 });
@@ -282,4 +283,5 @@ server.listen(config.port, config.host, () => {
   else if (saved || config.tiktokUsername) startTikTok(saved || config.tiktokUsername);
   else { tiktokStatus = 'not-configured'; log('TikTok username not set: set it from the control page.'); }
   worker();
+  if (config.ttsEngine === 'edge') { warmEdge(); setInterval(() => { if (wss.clients.size > 0) warmEdge(); }, 150000); }
 });
