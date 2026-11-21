@@ -11,4 +11,6 @@ t('viewer/host input saying رمضان is not deflected by the input filter', !c
 const man = JSON.parse(fs.readFileSync(new URL('../public/filler/manifest.json', import.meta.url)));
 const badFiller = man.clips.filter((c) => checkReply(c.t));
 t('pre-recorded filler has no religious references', badFiller.length === 0, badFiller.slice(0, 5).map((c) => c.f + ': ' + c.t + ' ' + JSON.stringify(checkReply(c.t))).join('\n'));
+const latinFiller = man.clips.filter((c) => /[A-Za-z]/.test(c.t));
+t('pre-recorded filler has no Latin letters', latinFiller.length === 0, latinFiller.slice(0, 5).map((c) => c.f + ': ' + c.t).join('\n'));
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

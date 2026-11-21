@@ -6,7 +6,7 @@
   const GAP = 2500; // pause between clips: Lammoa listens to the streamer here
   let audience = true; let all = [], clips = [], order = [], pos = 0, enabled = !urlOff, started = false, playing = false, lastLive = Date.now(), lastEnd = 0;
   const KEY = 'lammoa-filler-v2';
-  const CHOICE = 'lammoa-filler-choice'; // 'all' or a list of keys: 'a' (the mixed 30 min) and/or set-B topic ids
+  const CHOICE = 'lammoa-filler-choice'; // 'all' or a list of keys: 'a' (varied jokes ~30 min) and/or set-B topic ids
   // ?set=a | ?set=b | ?set=football,pets overrides the saved choice (handy for testing)
   function loadChoice() {
     const q = (qs.get('set') || '').trim();

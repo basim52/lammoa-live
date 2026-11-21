@@ -109,7 +109,7 @@
 <div id="title"><span class="name">لمّوعة</span><span class="brand">فرفشة</span></div>
 <div id="dot" title="الاتصال"></div>
 <button id="topicsBtn" type="button">المواضيع</button>
-<div id="start"><div id="pick"><h2>وش تسولف لمّوعة لما البث هادي؟</h2><div class="row big" id="presets"></div><small>أو اختر مواضيع بعينها (تقدر تختار أكثر من واحد):</small><div class="row chips" id="chips"></div></div><button id="go">اضغط للتشغيل</button><p class="help">بعد الضغط: الشاشة تبقى شغالة، صوت لمّوعة يطلع من الجهاز، وهي تسمعك من المايك. ارفع الصوت، وإذا سألك المتصفح عن المايك اضغط «سماح».</p></div>
+<div id="start"><div id="pick"><h2>وش نكت لمّوعة لما البث هادي؟</h2><div class="row big" id="presets"></div><small>أو اختر فقرات بعينها (تقدر تختار أكثر من واحد):</small><div class="row chips" id="chips"></div></div><button id="go">اضغط للتشغيل</button><p class="help">بعد الضغط: الشاشة تبقى شغالة، صوت لمّوعة يطلع من الجهاز، وهي تسمعك من المايك. ارفع الصوت، وإذا سألك المتصفح عن المايك اضغط «سماح».</p></div>
 <script src="/lammoa.js"></script>
 <script src="/mic.js"></script>
 <script src="/filler.js"></script>
@@ -146,7 +146,7 @@
     try { if ('wakeLock' in navigator) { lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => { lock = null; }); } } catch (e) { console.warn('wakeLock', e); }
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !lock) keepAwake(); });
-  // ---- filler picker: الكل / الكلام المنوّع / ١٠ مواضيع / pick topics; remembered on this device ----
+  // ---- filler picker: الكل / نكت منوّعة / ١٠ فقرات ضحك / pick topics; remembered on this device ----
   const AR = (n) => String(n).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[d]);
   let sel = null; // null = all, else Set of keys ('a' + topic ids)
   function renderPick() {
@@ -155,12 +155,12 @@
     const isAll = !sel || (sel.has('a') && ids.every((i) => sel.has(i)));
     const isB = !isAll && !sel.has('a') && ids.every((i) => sel.has(i));
     const pre = document.getElementById('presets'); pre.innerHTML = '';
-    [['all', 'الكل', isAll], ['a', `الكلام المنوّع (${AR(Math.round(info.aMs / 60000))} دقيقة)`, !isAll && sel.has('a')], ['b', `${AR(ids.length)} مواضيع`, isB]].forEach(([k, label, on]) => {
+    [['all', 'الكل', isAll], ['a', `نكت منوّعة (${AR(Math.round(info.aMs / 60000))} دقيقة)`, !isAll && sel.has('a')], ['b', `${AR(ids.length)} فقرات ضحك`, isB]].forEach(([k, label, on]) => {
       const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.className = on ? 'on' : ''; b.dataset.k = k;
       b.onclick = () => {
         if (k === 'all') sel = null;
         else if (k === 'b') sel = new Set(ids);
-        else if (isAll || isB) sel = new Set(['a']);          // «الكلام المنوّع» alone
+        else if (isAll || isB) sel = new Set(['a']);          // «نكت منوّعة» alone
         else { sel.has('a') ? sel.delete('a') : sel.add('a'); if (!sel.size) sel = null; } // add/remove it next to picked topics
         commit();
       };
