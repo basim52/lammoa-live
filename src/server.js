@@ -8,7 +8,7 @@ import { ROOT, config } from './config.js';
 import { EventQueue } from './queue.js';
 import { replyTo, rememberSpoken, rememberTurn, conversationState, resetConversation } from './brain.js';
 import { HearGate, transcribe } from './hear.js';
-import { synthesize, ttsState, splitForTts, warmEdge } from './tts.js';
+import { synthesize, ttsState, splitForTts, warmEdge, geminiAvailable } from './tts.js';
 import { connectTikTok } from './tiktok.js';
 
 const DEMO = process.argv.includes('--demo') || process.env.DEMO === '1';
@@ -46,6 +46,20 @@ function stageAuthed(req) {
 const hearGate = new HearGate();
 let sttInFlight = 0; const sttTimes = [];
 let micMode = null; // 'server' | 'web' | 'off' (null = config default)
+// Audience: while a TikTok live is connected, filler talk and idle lines only play when someone is watching
+// (viewer count > 0 recently, or a viewer join/comment/like/gift/follow in the last few minutes). Offline: no gate.
+const AUD_MS = Number(process.env.AUDIENCE_WINDOW_MS || 3 * 60 * 1000);
+const audience = { viewers: null, viewersAt: 0, activityAt: 0, sim: null };
+function liveNow() { return audience.sim ? audience.sim.live : tiktokStatus === 'connected'; }
+function audiencePresent() {
+  if (!liveNow()) return true;
+  const now = Date.now();
+  if (audience.viewers > 0 && now - audience.viewersAt < AUD_MS) return true;
+  return now - audience.activityAt < AUD_MS;
+}
+let lastAudience = null;
+function pushAudience(force = false) { const on = audiencePresent(); if (force || on !== lastAudience) { lastAudience = on; broadcast({ type: 'audience', on, live: liveNow(), viewers: audience.viewers }); } }
+setInterval(() => pushAudience(), 5000);
 let fillerOn = true; let fillerSeenAt = 0; // stage reports while it plays pre-recorded filler
 const IDLE_MS = Number(process.env.IDLE_MS ?? 90000);
 let lastActivity = Date.now();
@@ -81,7 +95,7 @@ const server = http.createServer(async (req, res) => {
   if (needsAuth && !stageOk && !authed(req, url)) { res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('401: رابط لوحة التحكم يحتاج المفتاح السري ?token=...'); }
   if (p === '/control') return sendFile(res, path.join(PUBLIC, 'control.html'));
   if (p === '/api/config') return json(res, 200, { name: config.characterName, open: config.characterOpen, closed: config.characterClosed });
-  if (p === '/api/status') return json(res, 200, { fillerOn, fillerPlayingRecently: Date.now() - fillerSeenAt < 60000, micMode: currentMicMode(), conversation: conversationState(), demo: DEMO, paused, queue: queue.length, stats: queue.stats, tiktok: tiktokStatus, tiktokUser: currentTikTok, hasKey: config.hasKey, tts: config.ttsEnabled, voice: config.voice, ttsEngine: config.ttsEngine, ttsLastEngine: ttsState.lastEngine, geminiTtsCooldownS: Math.max(0, Math.round((ttsState.geminiCooldownUntil - Date.now()) / 1000)), lastGeminiTtsError: ttsState.lastGeminiError, logs: logs.slice(-40), lastSpoken });
+  if (p === '/api/status') return json(res, 200, { fillerOn, audience: { present: audiencePresent(), live: liveNow(), viewers: audience.viewers, viewersAgoS: audience.viewersAt ? Math.round((Date.now() - audience.viewersAt) / 1000) : null, activityAgoS: audience.activityAt ? Math.round((Date.now() - audience.activityAt) / 1000) : null, sim: !!audience.sim }, fillerPlayingRecently: Date.now() - fillerSeenAt < 60000, micMode: currentMicMode(), conversation: conversationState(), demo: DEMO, paused, queue: queue.length, stats: queue.stats, tiktok: tiktokStatus, tiktokUser: currentTikTok, hasKey: config.hasKey, tts: config.ttsEnabled, voice: config.voice, ttsEngine: config.ttsEngine, ttsLastEngine: ttsState.lastEngine, ttsLastModel: ttsState.lastModel, ttsCooldowns: ttsState.cooldowns, geminiTtsCooldownS: Math.max(0, Math.round((ttsState.geminiCooldownUntil - Date.now()) / 1000)), lastGeminiTtsError: ttsState.lastGeminiError, logs: logs.slice(-40), lastSpoken });
   if (p.startsWith('/audio/')) {
     const id = p.slice(7).replace(/\.(wav|mp3)$/, '');
     const a = audioStore.get(id);
@@ -93,7 +107,7 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const ev = { type: String(b.type || 'chat'), user: String(b.user || 'ضيف').slice(0, 40), text: String(b.text || '').slice(0, 300), gift: b.gift ? String(b.gift).slice(0, 40) : undefined, count: Number(b.count || 1), source: 'manual' };
     if (!['chat', 'gift', 'join', 'follow', 'like'].includes(ev.type)) return json(res, 400, { ok: false });
-    lastActivity = Date.now();
+    lastActivity = Date.now(); audience.activityAt = Date.now(); pushAudience();
     const r = queue.push(ev);
     log(`[in] ${ev.type} ${ev.user}: ${ev.text || ev.gift || ''} -> ${r.ok ? 'queued' : 'skipped (' + r.reason + ')'}`);
     return json(res, 200, r);
@@ -147,6 +161,10 @@ const server = http.createServer(async (req, res) => {
     if (b.action === 'skip') { skipCurrent = true; broadcast({ type: 'stop' }); }
     if (b.action === 'clear') queue.items = [];
     if (b.action === 'forget') resetConversation();
+    if (b.action === 'sim-audience') { // testing only: pretend a TikTok live with N viewers; {live:false} or {off:true} ends the simulation
+      if (b.off) audience.sim = null; else { audience.sim = { live: b.live !== false }; if (b.viewers != null) { audience.viewers = Number(b.viewers); audience.viewersAt = Date.now(); } if (b.resetActivity) audience.activityAt = 0; }
+      pushAudience(true);
+    }
     if (b.action === 'filler' && typeof b.on === 'boolean') { fillerOn = b.on; saveState({ ...loadState(), fillerOn }); broadcast({ type: 'filler', on: fillerOn }); }
     if (b.action === 'mic' && ['server', 'web', 'off', 'default'].includes(b.mode)) {
       micMode = b.mode === 'default' ? null : b.mode;
@@ -177,8 +195,8 @@ function broadcast(msg) {
 }
 function currentMicMode() { return micMode || config.micMode; }
 wss.on('connection', (ws) => {
-  if (config.ttsEngine === 'edge') warmEdge();
-  ws.send(JSON.stringify({ type: 'hello', name: config.characterName, stageKey: STAGE_KEY, micMode: currentMicMode(), filler: fillerOn }));
+  warmEdge();
+  ws.send(JSON.stringify({ type: 'hello', name: config.characterName, stageKey: STAGE_KEY, micMode: currentMicMode(), filler: fillerOn, audience: audiencePresent() }));
   ws.on('message', (d) => { try { const m = JSON.parse(String(d).slice(0, 200)); if (m.type === 'filler-on') fillerSeenAt = Date.now(); } catch {} });
 });
 
@@ -193,11 +211,13 @@ function startTikTok(username) {
   if (!currentTikTok) { tiktokStatus = 'not-configured'; return; }
   tiktokStatus = 'connecting';
   tt = connectTikTok(currentTikTok, (ev) => {
+    if (ev.type === 'viewers') { audience.viewers = ev.count; audience.viewersAt = Date.now(); pushAudience(); return; }
+    audience.activityAt = Date.now(); pushAudience();
     if (!ev.user && ev.type !== 'like') ev.user = 'ضيف';
     lastActivity = Date.now();
     const r = queue.push(ev);
     if (ev.type !== 'like' && ev.type !== 'join') log(`[tiktok] ${ev.type} ${ev.user}: ${ev.text || ev.gift || ''}${r.ok ? '' : ' (skip ' + r.reason + ')'}`);
-  }, log, (st) => { tiktokStatus = st; });
+  }, log, (st) => { tiktokStatus = st; if (st !== 'connected') { audience.viewers = null; } pushAudience(); });
 }
 
 // ---------- Worker ----------
@@ -208,7 +228,7 @@ const idleWait = (ms) => new Promise((r) => { wake = r; setTimeout(() => { if (w
 
 async function worker() {
   for (;;) {
-    if (!paused && queue.length === 0 && IDLE_MS > 0 && Date.now() - lastActivity > IDLE_MS && wss.clients.size > 0 && Date.now() - fillerSeenAt > 60000) {
+    if (!paused && queue.length === 0 && IDLE_MS > 0 && Date.now() - lastActivity > IDLE_MS && wss.clients.size > 0 && Date.now() - fillerSeenAt > 60000 && audiencePresent()) {
       lastActivity = Date.now();
       queue.push({ type: 'idle', user: '', text: '' });
     }
@@ -223,7 +243,9 @@ async function worker() {
       const tBrain = Date.now() - started;
       let audioUrl = null; let durationMs = Math.max(2500, reply.text.length * 70); let ttsErr = null;
       const sid = crypto.randomBytes(4).toString('hex');
-      const chunks = config.ttsEnabled ? splitForTts(reply.text) : [];
+      // Zephyr reads the whole reply in one go (natural flow, half the quota); split into sentences only for Edge
+      const split = config.ttsSplit === 'always' || (config.ttsSplit === 'edge' && !geminiAvailable());
+      const chunks = config.ttsEnabled ? (split ? splitForTts(reply.text) : [reply.text]) : [];
       const synths = chunks.map((t) => synthesize(t).catch((e) => ({ error: e })));
       const store = (r) => {
         const id = crypto.randomBytes(6).toString('hex');
@@ -283,5 +305,5 @@ server.listen(config.port, config.host, () => {
   else if (saved || config.tiktokUsername) startTikTok(saved || config.tiktokUsername);
   else { tiktokStatus = 'not-configured'; log('TikTok username not set: set it from the control page.'); }
   worker();
-  if (config.ttsEngine === 'edge') { warmEdge(); setInterval(() => { if (wss.clients.size > 0) warmEdge(); }, 150000); }
+  { warmEdge(); setInterval(() => { if (wss.clients.size > 0) warmEdge(); }, 150000); }
 });

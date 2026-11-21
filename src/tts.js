@@ -12,36 +12,38 @@ function pcmToWav(pcm, sampleRate = 24000, channels = 1, bits = 16) {
   return Buffer.concat([h, pcm]);
 }
 
-// Engines: Gemini TTS (voice Zephyr) first; if it fails or the key's quota is exhausted (429),
-// fall back to Microsoft Edge neural voice (no key). After a 429, Gemini is skipped for a while.
-let geminiCooldownUntil = 0;
-export const ttsState = { lastEngine: null, geminiCooldownUntil: 0, lastGeminiError: null };
+// Engines: Gemini TTS (voice Zephyr, the original voice) first; each model that returns 429 is cooled down
+// for a while and the next Gemini model is tried; if all Gemini models fail / time out, Microsoft Edge (no key).
+const cooldown = new Map(); // model -> until
+export const ttsState = { lastEngine: null, lastModel: null, geminiCooldownUntil: 0, lastGeminiError: null, cooldowns: {} };
+const liveModels = () => config.ttsModels.filter((m) => (cooldown.get(m) || 0) <= Date.now());
+export function geminiAvailable() { return config.hasKey && config.ttsEngine !== 'edge' && liveModels().length > 0; }
+async function synthGemini(text) {
+  const t0 = Date.now(); let lastErr = new Error('Gemini TTS: all models cooling down');
+  for (const model of liveModels()) {
+    const left = config.geminiTtsBudgetMs - (Date.now() - t0);
+    if (left < 1500) { lastErr = new Error('Gemini TTS budget used'); break; }
+    try { const r = await synthOnce(text, model, Math.min(config.geminiTtsTimeoutMs, left)); ttsState.lastModel = model; return r; }
+    catch (e) {
+      lastErr = e; ttsState.lastGeminiError = e.message;
+      if (/HTTP 429/.test(e.message)) { cooldown.set(model, Date.now() + config.geminiCooldownMs); ttsState.cooldowns[model] = new Date(Date.now() + config.geminiCooldownMs).toISOString(); }
+    }
+  }
+  ttsState.geminiCooldownUntil = Math.min(...config.ttsModels.map((m) => cooldown.get(m) || 0));
+  throw lastErr;
+}
 export async function synthesize(text) {
   const engine = config.ttsEngine;
   let lastErr;
-  if (engine === 'edge') {
-    try { const r = await synthEdge(text); ttsState.lastEngine = 'edge'; return r; }
-    catch (e) { lastErr = e; }
-    if (!config.hasKey || Date.now() < geminiCooldownUntil) throw lastErr;
-    for (const model of config.ttsModels) {
-      try { const r = await synthOnce(text, model); ttsState.lastEngine = 'gemini'; return r; }
-      catch (e2) { ttsState.lastGeminiError = e2.message; if (/HTTP 429/.test(e2.message)) { geminiCooldownUntil = ttsState.geminiCooldownUntil = Date.now() + config.geminiCooldownMs; break; } }
-    }
-    throw lastErr;
-  }
-  const useGemini = engine === 'gemini' || (engine === 'auto' && config.hasKey && Date.now() >= geminiCooldownUntil);
-  if (useGemini) {
-    for (const model of config.ttsModels) {
-      try { const r = await synthOnce(text, model); ttsState.lastEngine = 'gemini'; return r; }
-      catch (e) {
-        lastErr = e; ttsState.lastGeminiError = e.message;
-        if (/HTTP 429/.test(e.message)) { geminiCooldownUntil = Date.now() + config.geminiCooldownMs; ttsState.geminiCooldownUntil = geminiCooldownUntil; break; }
-      }
-    }
-    if (engine === 'gemini') throw lastErr;
+  if (engine !== 'edge' && config.hasKey) {
+    try { const r = await synthGemini(text); ttsState.lastEngine = 'gemini'; return r; }
+    catch (e) { lastErr = e; if (engine === 'gemini') throw e; }
   }
   try { const r = await synthEdge(text); ttsState.lastEngine = 'edge'; return r; }
-  catch (e) { throw new Error(`${lastErr ? lastErr.message + ' | ' : ''}edge: ${e.message}`); }
+  catch (e) {
+    if (engine === 'edge' && config.hasKey) { try { const r = await synthGemini(text); ttsState.lastEngine = 'gemini'; return r; } catch {} }
+    throw new Error(`${lastErr ? lastErr.message + ' | ' : ''}edge: ${e.message}`);
+  }
 }
 
 // ---- Microsoft Edge neural TTS (free, no key) ----
@@ -77,7 +79,7 @@ export async function synthEdge(text, { attempt = 0 } = {}) {
 }
 function escapeXml(t) { return String(t).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c])); }
 
-async function synthOnce(text, model) {
+export async function synthOnce(text, model, timeoutMs = 30000) {
   const key = apiKey();
   if (!key) throw new Error('GEMINI_API_KEY missing');
   const body = {
@@ -88,7 +90,7 @@ async function synthOnce(text, model) {
     },
   };
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 30000);
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: 'POST', signal: ctrl.signal,

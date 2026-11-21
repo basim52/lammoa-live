@@ -30,7 +30,11 @@ export function connectTikTok(username, onEvent, log = console.log, onStatus = (
     conn.on(WebcastEvent.MEMBER, (d) => onEvent({ type: 'join', user: nameOf(d.user) }));
     conn.on(WebcastEvent.FOLLOW, (d) => onEvent({ type: 'follow', user: nameOf(d.user) }));
     conn.on(WebcastEvent.LIKE, (d) => onEvent({ type: 'like', user: nameOf(d.user), count: d.likeCount || 0 }));
-    conn.on(WebcastEvent.STREAM_END, () => { log('[tiktok] stream ended'); });
+    conn.on(WebcastEvent.ROOM_USER, (d) => {
+      const n = Number(d.viewerCount ?? d.total ?? d.totalUser ?? d.m_total ?? NaN);
+      if (Number.isFinite(n)) onEvent({ type: 'viewers', count: n });
+    });
+    conn.on(WebcastEvent.STREAM_END, () => { log('[tiktok] stream ended'); onStatus('ended'); });
     conn.on(ControlEvent.DISCONNECTED, () => { log('[tiktok] disconnected'); onStatus('reconnecting'); if (!stopped) scheduleRetry(); });
     conn.on(ControlEvent.ERROR, (e) => log('[tiktok] error:', e?.message || e?.info || String(e)));
     try {

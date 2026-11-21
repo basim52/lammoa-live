@@ -38,8 +38,11 @@ export const config = {
   hostName: (env.HOST_NAME || '').trim(),
   micMode: env.MIC_MODE || 'server',
   ttsEnabled: env.TTS_ENABLED !== '0',
-  ttsEngine: (env.TTS_ENGINE || 'edge').toLowerCase(), // edge (Edge first, Gemini fallback) | auto (Gemini first, Edge fallback) | gemini
-  geminiCooldownMs: Number(env.GEMINI_TTS_COOLDOWN_MS || 15 * 60 * 1000),
+  ttsEngine: (env.TTS_ENGINE || 'auto').toLowerCase(), // auto (Gemini Zephyr first, Edge fallback) | edge (Edge first) | gemini (Gemini only)
+  geminiTtsTimeoutMs: Number(env.GEMINI_TTS_TIMEOUT_MS || 12000), // per Gemini TTS call before trying the next model / Edge
+  geminiTtsBudgetMs: Number(env.GEMINI_TTS_BUDGET_MS || 16000),   // total time on Gemini models before falling back to Edge
+  ttsSplit: env.TTS_SPLIT || 'edge', // split replies into sentence chunks: edge (only when Edge is the engine) | always | never
+  geminiCooldownMs: Number(env.GEMINI_TTS_COOLDOWN_MS || 5 * 60 * 1000),
   edgeVoice: env.EDGE_VOICE || 'ar-SA-ZariyahNeural',
   edgeFormat: env.EDGE_FORMAT || 'audio-24khz-96kbitrate-mono-mp3', // best format the free Edge endpoint accepts
   edgePitch: env.EDGE_PITCH || '+2%',

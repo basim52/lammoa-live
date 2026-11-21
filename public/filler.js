@@ -4,7 +4,7 @@
   const urlOff = (qs.get('filler') || '').toLowerCase() === 'off';
   const WAIT = Math.max(3, Number(qs.get('fillerwait')) || 12) * 1000;
   const GAP = 2500; // pause between clips: Lammoa listens to the streamer here
-  let all = [], clips = [], order = [], pos = 0, enabled = !urlOff, started = false, playing = false, lastLive = Date.now(), lastEnd = 0;
+  let audience = true; let all = [], clips = [], order = [], pos = 0, enabled = !urlOff, started = false, playing = false, lastLive = Date.now(), lastEnd = 0;
   const KEY = 'lammoa-filler-v2';
   const CHOICE = 'lammoa-filler-choice'; // 'all' or a list of keys: 'a' (the mixed 30 min) and/or set-B topic ids
   // ?set=a | ?set=b | ?set=football,pets overrides the saved choice (handy for testing)
@@ -49,7 +49,9 @@
   addEventListener('lammoa:live', markLive);          // a live reply (comment, gift, his speech) arrived
   addEventListener('lammoa:heard-start', markLive);   // he started talking
   addEventListener('lammoa:heard', markLive);
-  addEventListener('lammoa:hello', (e) => { if (typeof e.detail.filler === 'boolean') enabled = e.detail.filler && !urlOff; });
+  addEventListener('lammoa:hello', (e) => { if (typeof e.detail.filler === 'boolean') enabled = e.detail.filler && !urlOff; if (typeof e.detail.audience === 'boolean') audience = e.detail.audience; });
+  // during a TikTok live with nobody watching she stays quiet (server decides; offline = always on)
+  addEventListener('lammoa:audience', (e) => { audience = !!e.detail; window.__audience = audience; if (!audience && playing) stopAudio(); });
   addEventListener('lammoa:filler', (e) => { enabled = !!e.detail && !urlOff; if (!enabled && playing) stopAudio(); });
   // tap the screen while she's doing filler: she stops and listens for a while
   addEventListener('pointerdown', (e) => { if (e.target.closest && e.target.closest('#start')) return; if (playing) { stopAudio(); lastLive = Date.now() + 20000; } });
@@ -57,7 +59,7 @@
   window.startFiller = () => { started = true; };
   setInterval(() => { if (started && enabled && window.__ws && window.__ws.readyState === 1) window.__ws.send(JSON.stringify({ type: 'filler-on' })); }, 20000);
 
-  const ready = () => started && enabled && order.length && !playing && !window.__speaking && !window.__micBusy &&
+  const ready = () => started && enabled && audience && order.length && !playing && !window.__speaking && !window.__micBusy &&
     Date.now() - lastLive > WAIT && Date.now() - lastEnd > GAP && document.visibilityState === 'visible';
   async function tick() {
     if (ready()) {
