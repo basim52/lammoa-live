@@ -264,7 +264,7 @@ async function replyToHost(heard) {
       const raw = await callGemini(prompt + (attempt ? (lastWhy === 'english' ? ENGLISH_NOTE : '\n[ردك السابق انرفض (طويل أو يشبه ردودك الأخيرة أو فيه كلام ممنوع). جيبي رد أقصر ومختلف.]') : ''), { temperature: 0.7 + attempt * 0.1, useHistory: false, maxTokens: 90 });
       text = trimTo(clean(raw), 22);
       const ph = checkText(text);
-      const sim = (ph ? `postfilter:${ph.category}:${ph.hit}` : null) || (latinRatio(text) > 0.12 ? 'english' : null) || (recent.slice(-3).includes(text) ? 'repeat' : null) || (words(text).length > 22 ? 'too-long' : null) || (STEREO.test(normalize(text)) ? 'stereotype' : null);
+      const sim = (ph ? `postfilter:${ph.category}:${ph.hit}` : null) || (latinRatio(text) > 0.12 ? 'english' : null) || (recent.slice(-3).includes(text) ? 'repeat' : null) || (words(text).length > 30 ? 'too-long' : null) || (STEREO.test(normalize(text)) ? 'stereotype' : null);
       if (!sim) break;
       lastWhy = sim;
       console.warn('[brain] rejected host reply, retrying:', sim);
