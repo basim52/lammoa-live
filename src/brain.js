@@ -88,11 +88,46 @@ function steer({ allowQuestion = true } = {}) {
 const history = []; // short memory of recent exchanges for variety
 const MAX_HISTORY = 6;
 
-async function callGemini(userText, { temperature = 0.95 } = {}) {
+// ---- conversation memory with the streamer (host) ----
+const convo = [];      // { who: 'host'|'lammoa', text }
+const MAX_CONVO = 10;
+const comments = [];   // recent viewer comments + her reply, context for the chat with the host
+const MAX_COMMENTS = 6;
+export function rememberTurn(who, text) {
+  if (!text) return;
+  convo.push({ who, text: String(text).slice(0, 300) });
+  while (convo.length > MAX_CONVO) convo.shift();
+}
+export function rememberComment(user, text, reply) {
+  comments.push({ user: String(user || '').slice(0, 30), text: String(text || '').slice(0, 160), reply: reply ? String(reply).slice(0, 160) : '' });
+  while (comments.length > MAX_COMMENTS) comments.shift();
+}
+export function conversationState() { return { convo: convo.slice(), comments: comments.slice() }; }
+export function resetConversation() { convo.length = 0; comments.length = 0; }
+
+const HOST = () => config.hostName || 'صاحب البث';
+export function buildHostPrompt(heard, st = conversationState()) {
+  const lines = st.convo.map((t) => `${t.who === 'host' ? HOST() : config.characterName}: ${t.text}`).join('\n');
+  const cm = st.comments.map((c) => `- ${safeName(c.user) || 'مشاهد'}: «${c.text.replace(/[«»]/g, '')}»${c.reply ? ` (رديتي: ${c.reply})` : ''}`).join('\n');
+  return `[سالفة مباشرة بالصوت مع ${HOST()}]
+${HOST()} هو صاحب البث، يكلمك بصوته الحين قدام الجمهور، وأنتِ تردين عليه كأنكم ثنائي تسولفون في البث.
+${lines ? `آخر السالفة بينكم (من الأقدم للأحدث):\n${lines}\n` : 'هذي أول جملة يقولها لك في السالفة.\n'}${cm ? `آخر تعليقات المشاهدين (للسياق فقط، لا تردين عليها إلا إذا سألك عنها):\n${cm}\n` : ''}
+كلامه الحين (منقول من المايك وممكن فيه أخطاء سماع بسيطة، افهمي المقصود): «${String(heard).replace(/[«»]/g, '').slice(0, 400)}»
+
+كيف تردين:
+- ردي على كلامه هو بالذات وكمّلي على اللي قبله في السالفة، لا تبدين من الصفر ولا تعيدين نفس كلامك.
+- إذا سألك سؤال جاوبيه بوضوح أول شي. إذا طلب شي (نكتة، ترحيب بأحد، تحدي للجمهور، تقرين تعليق) سويه على طول.
+- خليها سوالف طبيعية خفيفة دم، وممكن تمزحين معه بلطف وتحترمينه لأنه صاحب البث.
+- تقدرين تختمين بسؤال متابعة قصير له عشان تكمل السالفة، بس مو كل مرة.
+- جملة إلى ثلاث جمل قصار (10 إلى 28 كلمة). بدون إيموجي.
+- إذا كلامه في سياسة أو دين أو أي شي خادش، غيّري الموضوع بنكتة خفيفة بدون وعظ.`;
+}
+
+async function callGemini(userText, { temperature = 0.95, useHistory = true } = {}) {
   const key = apiKey();
   if (!key) throw new Error('GEMINI_API_KEY missing');
   const contents = [];
-  for (const h of history) {
+  for (const h of (useHistory ? history : [])) {
     contents.push({ role: 'user', parts: [{ text: h.u }] });
     contents.push({ role: 'model', parts: [{ text: h.m }] });
   }
@@ -156,6 +191,7 @@ function clean(text) {
  * Returns { text, source: 'model'|'prefilter'|'postfilter'|'fallback', blocked? }
  */
 export async function replyTo(ev) {
+  if (ev.type === 'host') return replyToHost(ev.text);
   const name = safeName(ev.user);
   if (ev.type === 'chat') {
     const hit = checkText(ev.text);
@@ -186,10 +222,46 @@ export async function replyTo(ev) {
     if (post) return { text: deflection(), source: 'postfilter', blocked: post };
     history.push({ u: prompt, m: text });
     while (history.length > MAX_HISTORY) history.shift();
+    if (ev.type === 'chat') rememberComment(name, ev.text, text);
     return { text, source: 'model' };
   } catch (e) {
     console.warn('[brain]', e.message);
     return { text: fallbackLine(ev, name), source: 'fallback', error: e.message };
+  }
+}
+
+const HOST_FALLBACK = ['سمعتك بس الشرارة علّقت شوي، عيد لي آخر كلمة؟', 'لحظة لحظة، خلني أستوعب وأرجع لك بالرد الصح!', 'والله إنك جبتها، بس قول لي أكثر عشان أرد عليك صح؟'];
+let hfi = 0;
+async function replyToHost(heard) {
+  const hit = checkText(heard);
+  if (hit) {
+    const text = deflection();
+    rememberTurn('host', '(قال كلام في موضوع ممنوع، وغيّرتي الموضوع)');
+    rememberTurn('lammoa', text);
+    return { text, source: 'prefilter', blocked: hit };
+  }
+  const prompt = buildHostPrompt(heard);
+  try {
+    let text = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const raw = await callGemini(prompt + (attempt ? '\n[ردك السابق انرفض (طويل أو يشبه ردودك الأخيرة أو فيه كلام ممنوع). جيبي رد أقصر ومختلف.]' : ''), { temperature: 0.8 + attempt * 0.1, useHistory: false });
+      text = clean(raw);
+      const ph = checkText(text);
+      const sim = (ph ? `postfilter:${ph.category}:${ph.hit}` : null) || (recent.slice(-3).includes(text) ? 'repeat' : null) || (words(text).length > 34 ? 'too-long' : null) || (STEREO.test(normalize(text)) ? 'stereotype' : null);
+      if (!sim) break;
+      console.warn('[brain] rejected host reply, retrying:', sim);
+      if (attempt === 2) text = ph ? deflection() : HOST_FALLBACK[hfi++ % HOST_FALLBACK.length];
+    }
+    const post = checkText(text);
+    if (post) text = deflection();
+    rememberTurn('host', heard);
+    rememberTurn('lammoa', text);
+    return { text, source: post ? 'postfilter' : 'model', blocked: post || undefined };
+  } catch (e) {
+    console.warn('[brain]', e.message);
+    const text = HOST_FALLBACK[hfi++ % HOST_FALLBACK.length];
+    rememberTurn('host', heard);
+    return { text, source: 'fallback', error: e.message };
   }
 }
 

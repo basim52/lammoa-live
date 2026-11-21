@@ -52,6 +52,14 @@
   #start p { font-family:Tajawal,sans-serif; font-weight:700; font-size:3.4vmin; margin:0; opacity:.9; text-align:center; padding:0 6vmin; }
   #dot { position:fixed; bottom:1.5vmin; left:1.5vmin; width:1.6vmin; height:1.6vmin; border-radius:50%; background:#e33; opacity:.6; z-index:4; }
   body.online #dot { background:#2c4; opacity:.35; }
+  #mic { position:fixed; bottom:1.1vmin; left:4.4vmin; z-index:4; display:flex; align-items:center; gap:1vmin; max-width:60vw; font-family:Tajawal,sans-serif; font-weight:700; font-size:2.3vmin; color:#fff; direction:rtl; pointer-events:none; }
+  #mic i { flex:0 0 auto; width:1.6vmin; height:1.6vmin; border-radius:50%; background:#2c4; opacity:.5; transition:transform .08s; }
+  #mic span { background:rgba(11,42,111,.55); border-radius:2vmin; padding:.3vmin 1.6vmin; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; unicode-bidi:plaintext; }
+  #mic span:empty { display:none; }
+  #mic[data-state=paused] i, #mic[data-state=wait] i { background:#bbb; transform:none !important; }
+  #mic[data-state=thinking] i { background:#FFC93C; }
+  #mic[data-state=denied] i { background:#e33; opacity:.9; }
+  #mic[data-state=denied] span { background:rgba(200,30,30,.8); }
 </style>
 </head>
 <body>
@@ -61,8 +69,9 @@
   <div id="wrap"><div id="char"><div id="body"><img id="imgOpen" alt=""><img id="imgClosed" class="closed" alt=""></div></div><div id="shadow"></div></div>
 </div>
 <div id="dot" title="الاتصال"></div>
-<div id="start"><button id="go">اضغط للتشغيل</button><p>بعد الضغط: الشاشة تبقى شغالة وصوت لمّوعة يطلع من الجهاز. ارفع الصوت.</p></div>
+<div id="start"><button id="go">اضغط للتشغيل</button><p>بعد الضغط: الشاشة تبقى شغالة، صوت لمّوعة يطلع من الجهاز، وهي تسمعك من المايك. ارفع الصوت، وإذا سألك المتصفح عن المايك اضغط «سماح».</p></div>
 <script src="/lammoa.js"></script>
+<script src="/mic.js"></script>
 <script>
   let lock = null;
   async function keepAwake() {
@@ -74,7 +83,9 @@
     try { if (!document.fullscreenElement && document.documentElement.requestFullscreen && !qs.has('nofs')) await document.documentElement.requestFullscreen({ navigationUI: 'hide' }); } catch {}
     await keepAwake();
     document.getElementById('start').style.display = 'none';
-    showBubble({ user: '', text: 'جاهزة! اكتبوا تعليقاتكم وأنا أرد عليكم.', durationMs: 1500 }); hideBubbleSoon(5000);
+    window.startMic && window.startMic();
+    const micOn = (qs.get('mic') || '').toLowerCase() !== 'off';
+    showBubble({ user: '', text: micOn ? 'جاهزة! كلّمني وأنا أسمعك، واكتبوا تعليقاتكم.' : 'جاهزة! اكتبوا تعليقاتكم وأنا أرد عليكم.', durationMs: 1500 }); hideBubbleSoon(5000);
   }
   document.getElementById('start').addEventListener('click', start);
   if (qs.has('autostart')) start();

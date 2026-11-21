@@ -1,7 +1,7 @@
 // Event queue: priorities, de-duplication, spam control, rate limit.
 import { normalize } from './filter.js';
 
-const PRIORITY = { say: 0, gift: 1, follow: 2, chat: 3, like: 4, join: 5, idle: 6 };
+const PRIORITY = { host: 0, say: 0, gift: 1, follow: 2, chat: 3, like: 4, join: 5, idle: 6 };
 const MAX_QUEUE = 25;
 
 export class EventQueue {
@@ -26,7 +26,7 @@ export class EventQueue {
     this.items.sort((a, b) => a.priority - b.priority || a.ts - b.ts);
     // overflow: drop lowest-priority / oldest non-manual items
     while (this.items.length > MAX_QUEUE) {
-      const idx = this.items.findLastIndex((x) => x.type !== 'say' && x.type !== 'gift');
+      const idx = this.items.findLastIndex((x) => x.type !== 'say' && x.type !== 'host' && x.type !== 'gift');
       this.items.splice(idx >= 0 ? idx : this.items.length - 1, 1);
       this.stats.dropped++;
     }
@@ -35,6 +35,12 @@ export class EventQueue {
   }
 
   _reject(ev, now) {
+    if (ev.type === 'host') {
+      // streamer kept talking before she answered: merge into the pending turn
+      const p = this.items.find((x) => x.type === 'host');
+      if (p) { p.text = `${p.text} ${ev.text}`.slice(0, 500); return 'merged-host'; }
+      return null;
+    }
     if (ev.type === 'say' || ev.type === 'idle') return null;
     if (ev.type === 'chat') {
       const n = normalize(String(ev.text).replace(/\[[\w-]+\]/g, ' '));
