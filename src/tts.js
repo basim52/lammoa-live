@@ -29,10 +29,10 @@ async function synthGemini(text) {
     try {
       const r = await synthOnce(text, model, config.geminiTtsTimeoutMs);
       // some TTS models read the line twice; far longer than the text needs = reject
-      if (r.durationMs > 1500 + words * 800) throw new Error(`Gemini TTS ${model} too long (${Math.round(r.durationMs / 1000)}s for ${words} words)`);
+      if (r.durationMs > 2500 + words * 900) throw new Error(`Gemini TTS ${model} too long (${Math.round(r.durationMs / 1000)}s for ${words} words)`);
       ttsState.lastModel = model; return r;
     } catch (e) {
-      ttsState.lastGeminiError = e.message;
+      ttsState.lastGeminiError = e.message; console.warn('[tts]', e.message);
       if (/HTTP 429/.test(e.message)) { cooldown.set(model, Date.now() + config.geminiCooldownMs); ttsState.cooldowns[model] = new Date(Date.now() + config.geminiCooldownMs).toISOString(); }
       throw e;
     } finally { ttsState.geminiCooldownUntil = Math.min(...config.ttsModels.map((m) => cooldown.get(m) || 0)); }
@@ -46,6 +46,7 @@ export async function synthesize(text) {
     try { const r = await synthGemini(text); ttsState.lastEngine = 'gemini'; return r; }
     catch (e) { lastErr = e; if (engine === 'gemini') throw e; }
   }
+  if (lastErr) console.warn('[tts] Gemini failed, using Edge:', lastErr.message);
   try { const r = await synthEdge(text); ttsState.lastEngine = 'edge'; return r; }
   catch (e) {
     if (engine === 'edge' && config.hasKey) { try { const r = await synthGemini(text); ttsState.lastEngine = 'gemini'; return r; } catch {} }
