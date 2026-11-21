@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, config, apiKey } from './config.js';
 import { checkText, deflection, safeName, normalize } from './filter.js';
+import { hedge } from './hedge.js';
 
 const rules = fs.readFileSync(path.join(ROOT, 'prompt', 'rules.md'), 'utf8');
 
@@ -76,6 +77,13 @@ export function latinRatio(t) {
 }
 export function stripLatin(t) { return String(t).replace(/[A-Za-z][A-Za-z'’.-]*/g, '').replace(/\s+([،,.!؟?])/g, '$1').replace(/\s+/g, ' ').trim(); }
 const ENGLISH_NOTE = '\n[ردك السابق فيه إنجليزي. ردي بالعربي السعودي فقط وبدون أي حرف إنجليزي.]';
+// Too long? keep the first sentence(s) that fit instead of paying for another model call.
+function trimTo(t, max) {
+  if (words(t).length <= max) return t;
+  const parts = String(t).split(/(?<=[.!؟?…])\s+/); let out = parts[0];
+  for (let i = 1; i < parts.length && words(out + ' ' + parts[i]).length <= max; i++) out += ' ' + parts[i];
+  return words(out).length >= 4 && words(out).length <= max ? out : t;
+}
 function words(t) { return normalize(t).split(' ').filter((w) => w.length > 1); }
 function opener(t) { return words(t).slice(0, 2).join(' '); }
 function tooSimilar(t) {
@@ -149,25 +157,21 @@ async function callGemini(userText, { temperature = 0.95, useHistory = true, max
     safetySettings: ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT']
       .map((category) => ({ category, threshold: 'BLOCK_ONLY_HIGH' })),
   };
-  let lastErr;
-  for (const model of config.textModels) {
-    for (const withThinking of [true, false]) {
-      const b = withThinking ? body : { ...body, generationConfig: { ...body.generationConfig, thinkingConfig: undefined } };
-      try { return await postModel(model, b, key); }
-      catch (e) {
-        lastErr = e;
-        console.warn('[brain]', e.message);
-        if (withThinking && /HTTP 400/.test(e.message)) continue; // model may not accept thinkingLevel
-        break; // try next model
-      }
+  // one task per model (each retries once without thinkingLevel on HTTP 400); hedge to the backup model if slow
+  const tasks = config.textModels.map((model) => async () => {
+    try { return await postModel(model, body, key); }
+    catch (e) {
+      console.warn('[brain]', e.message);
+      if (/HTTP 400/.test(e.message)) return postModel(model, { ...body, generationConfig: { ...body.generationConfig, thinkingConfig: undefined } }, key);
+      throw e;
     }
-  }
-  throw lastErr;
+  });
+  return hedge(tasks, config.hedgeMs);
 }
 
 async function postModel(model, body, key) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 7000);
+  const t = setTimeout(() => ctrl.abort(), 6000);
   try {
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: 'POST', signal: ctrl.signal,
@@ -258,7 +262,7 @@ async function replyToHost(heard) {
     let text = ''; let lastWhy = '';
     for (let attempt = 0; attempt < 3; attempt++) {
       const raw = await callGemini(prompt + (attempt ? (lastWhy === 'english' ? ENGLISH_NOTE : '\n[ردك السابق انرفض (طويل أو يشبه ردودك الأخيرة أو فيه كلام ممنوع). جيبي رد أقصر ومختلف.]') : ''), { temperature: 0.7 + attempt * 0.1, useHistory: false, maxTokens: 90 });
-      text = clean(raw);
+      text = trimTo(clean(raw), 22);
       const ph = checkText(text);
       const sim = (ph ? `postfilter:${ph.category}:${ph.hit}` : null) || (latinRatio(text) > 0.12 ? 'english' : null) || (recent.slice(-3).includes(text) ? 'repeat' : null) || (words(text).length > 22 ? 'too-long' : null) || (STEREO.test(normalize(text)) ? 'stereotype' : null);
       if (!sim) break;

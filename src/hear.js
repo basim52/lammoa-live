@@ -1,6 +1,7 @@
 // Streamer's own voice ("host" speech): noise/duplicate gate + Gemini speech-to-text fallback.
 import { config, apiKey } from './config.js';
 import { normalize } from './filter.js';
+import { hedge } from './hedge.js';
 
 // Fillers / noise words that are not worth a reply on their own.
 const FILLER = new Set(['اه', 'ااه', 'اها', 'ام', 'امم', 'ايه', 'ها', 'هه', 'ههه', 'هم', 'همم', 'طيب', 'اوك', 'ok', 'okay', 'يب', 'لا', 'نعم', 'اي', 'يا', 'و', 'شكرا', 'uh', 'um', 'hmm', 'ah']);
@@ -46,11 +47,10 @@ export async function transcribe(wav) {
     generationConfig: { temperature: 0, maxOutputTokens: 160, thinkingConfig: { thinkingLevel: 'minimal' } },
   };
   let lastErr;
-  const tries = [];
-  for (const model of config.sttModels) { tries.push([model, body]); tries.push([model, { ...body, generationConfig: { temperature: 0, maxOutputTokens: 160 } }]); }
-  for (const [model, b] of tries) {
+  const noThink = { ...body, generationConfig: { temperature: 0, maxOutputTokens: 160 } };
+  const once = async (model, b) => {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 12000);
+    const t = setTimeout(() => ctrl.abort(), 8000);
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: 'POST', signal: ctrl.signal,
@@ -59,14 +59,16 @@ export async function transcribe(wav) {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(`Gemini STT ${model} HTTP ${res.status}: ${j?.error?.status || ''}`);
-      const text = (j.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || '').join('').trim();
-      return cleanTranscript(text);
+      return cleanTranscript((j.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || '').join('').trim());
     } catch (e) {
-      lastErr = e.name === 'AbortError' ? new Error(`Gemini STT ${model} timeout`) : e;
-      if (b === body && !/HTTP 400/.test(lastErr.message)) tries.splice(tries.findIndex((x) => x[1] !== body && x[0] === model), 1); // only retry without thinking on 400
+      throw e.name === 'AbortError' ? new Error(`Gemini STT ${model} timeout`) : e;
     } finally { clearTimeout(t); }
-  }
-  throw lastErr;
+  };
+  const tasks = config.sttModels.map((model) => async () => {
+    try { return await once(model, body); }
+    catch (e) { if (/HTTP 400/.test(e.message)) return once(model, noThink); throw e; }
+  });
+  return hedge(tasks, config.hedgeMs + 500);
 }
 
 export function cleanTranscript(t) {
