@@ -1,6 +1,7 @@
 // Gemini TTS -> WAV buffer (24 kHz mono 16-bit PCM). Key in header only.
 import { config, apiKey } from './config.js';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
+import { hedge } from './hedge.js';
 
 function pcmToWav(pcm, sampleRate = 24000, channels = 1, bits = 16) {
   const h = Buffer.alloc(44);
@@ -18,25 +19,25 @@ const cooldown = new Map(); // model -> until
 export const ttsState = { lastEngine: null, lastModel: null, geminiCooldownUntil: 0, lastGeminiError: null, cooldowns: {} };
 const liveModels = () => config.ttsModels.filter((m) => (cooldown.get(m) || 0) <= Date.now());
 export function geminiAvailable() { return config.hasKey && config.ttsEngine !== 'edge' && liveModels().length > 0; }
+// Hedged: the first model starts at once; if it hasn't answered after ttsHedgeMs, the next one starts too
+// (same voice, Zephyr). First good audio wins.
 async function synthGemini(text) {
-  const t0 = Date.now(); let lastErr = new Error('Gemini TTS: all models cooling down');
-  for (const model of liveModels()) {
-    const left = config.geminiTtsBudgetMs - (Date.now() - t0);
-    if (left < 1500) { lastErr = new Error('Gemini TTS budget used'); break; }
+  const models = liveModels();
+  if (!models.length) throw new Error('Gemini TTS: all models cooling down');
+  const words = String(text).split(/\s+/).filter(Boolean).length;
+  const task = (model) => async () => {
     try {
-      const r = await synthOnce(text, model, Math.min(config.geminiTtsTimeoutMs, left));
-      // some TTS models read the line twice; far longer than the text needs = reject and try the next engine
-      const words = String(text).split(/\s+/).filter(Boolean).length;
+      const r = await synthOnce(text, model, config.geminiTtsTimeoutMs);
+      // some TTS models read the line twice; far longer than the text needs = reject
       if (r.durationMs > 1500 + words * 800) throw new Error(`Gemini TTS ${model} too long (${Math.round(r.durationMs / 1000)}s for ${words} words)`);
       ttsState.lastModel = model; return r;
-    }
-    catch (e) {
-      lastErr = e; ttsState.lastGeminiError = e.message;
+    } catch (e) {
+      ttsState.lastGeminiError = e.message;
       if (/HTTP 429/.test(e.message)) { cooldown.set(model, Date.now() + config.geminiCooldownMs); ttsState.cooldowns[model] = new Date(Date.now() + config.geminiCooldownMs).toISOString(); }
-    }
-  }
-  ttsState.geminiCooldownUntil = Math.min(...config.ttsModels.map((m) => cooldown.get(m) || 0));
-  throw lastErr;
+      throw e;
+    } finally { ttsState.geminiCooldownUntil = Math.min(...config.ttsModels.map((m) => cooldown.get(m) || 0)); }
+  };
+  return hedge(models.map(task), config.ttsHedgeMs);
 }
 export async function synthesize(text) {
   const engine = config.ttsEngine;

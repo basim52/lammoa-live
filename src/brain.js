@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, config, apiKey } from './config.js';
-import { checkText, deflection, safeName, normalize } from './filter.js';
+import { checkText, checkReply, deflection, safeName, normalize } from './filter.js';
 import { hedge } from './hedge.js';
 
 const rules = fs.readFileSync(path.join(ROOT, 'prompt', 'rules.md'), 'utf8');
@@ -27,6 +27,7 @@ const SYSTEM = `${rules}
 - الكلام لازم يكون منطقي ومفهوم من أول سمعة. ممنوع الخيال الغريب أو الجمل المتلخبطة.
 - المراجع اليومية (قهوة، كبسة، زحمة، دوام، مكيف) استخدميها فقط إذا لها علاقة بكلام المشاهد، تقريباً رد من كل ثلاثة. لا تجيبين طاري الكبسة أو المكيف أو كونك شرارة في كل رد.
 - لا تستخدمين كلمات مثل «غبي» أو «ثقيل» أو «دب» عن أي شخص حتى في النكت.
+- ممنوع أي ذكر للدين أو العبادات في كلامك، ولا حتى تشبيه أو مزح: لا أذان ولا صلاة ولا رمضان ولا صيام ولا مسجد ولا قرآن ولا دعاء ولا حج أو عمرة ولا جنة أو نار ولا حلال أو حرام. شبّهي بأشياء يومية (قهوة، مكيف، زحمة، جوال، كبسة).
 - ممنوع نكت عن الجنسيات أو العمالة أو المناطق أو القبايل أو الأشكال أو الوزن، حتى لو كانت "خفيفة".
 
 ## أمثلة على المستوى المطلوب (مواقف مختلفة، للإحساس بالأسلوب فقط، ممنوع تعيدينها أو تقلدين نفس الفكرة)
@@ -76,6 +77,7 @@ export function latinRatio(t) {
   return lat + ar ? lat / (lat + ar) : 0;
 }
 export function stripLatin(t) { return String(t).replace(/[A-Za-z][A-Za-z'’.-]*/g, '').replace(/\s+([،,.!؟?])/g, '$1').replace(/\s+/g, ' ').trim(); }
+const RELIGION_NOTE = '\n[ردك السابق فيه ذكر للدين أو العبادات (مثل الأذان أو الصلاة أو رمضان). ممنوع. جيبي رد بفكرة وتشبيه من الحياة اليومية بدون أي شي ديني.]';
 const ENGLISH_NOTE = '\n[ردك السابق فيه إنجليزي. ردي بالعربي السعودي فقط وبدون أي حرف إنجليزي.]';
 // Too long? keep the first sentence(s) that fit instead of paying for another model call.
 function trimTo(t, max) {
@@ -138,7 +140,9 @@ ${lines ? `آخر السالفة بينكم (من الأقدم للأحدث):\n$
 - تقدرين تختمين بسؤال متابعة قصير له عشان تكمل السالفة، بس مو كل مرة.
 - رد قصير وسريع: جملة أو جملتين قصار (6 إلى 18 كلمة). بدون إيموجي.
 - بالعربي السعودي فقط حتى لو كلامه فيه إنجليزي، وبدون أي حروف إنجليزية.
-- إذا كلامه في سياسة أو دين أو أي شي خادش، غيّري الموضوع بنكتة خفيفة بدون وعظ.`;
+- إذا كلامه في سياسة أو دين أو أي شي خادش، غيّري الموضوع بنكتة خفيفة بدون وعظ.
+- ابدي ردك بجملة قصيرة (من ثلاث إلى ست كلمات) تنتهي بنقطة أو علامة تعجب، وبعدها كمّلي.
+- لا تذكرين الدين أو العبادات في ردك أبداً، ولا حتى تشبيه (لا أذان ولا صلاة ولا رمضان ولا مسجد ولا دعاء).`;
 }
 
 async function callGemini(userText, { temperature = 0.95, useHistory = true, maxTokens = 160 } = {}) {
@@ -223,20 +227,20 @@ export async function replyTo(ev) {
   try {
     let text = ''; let lastWhy = '';
     for (let attempt = 0; attempt < 3; attempt++) {
-      const raw = await callGemini(prompt + steer({ allowQuestion: ev.type !== 'idle' }) + (attempt ? (lastWhy === 'english' ? ENGLISH_NOTE : '\n[ردك السابق انرفض (مكرر أو طويل أو فيه نكتة عن فئة من الناس). جيبي رد أقصر بفكرة وبداية مختلفة تماماً.]') : ''), { temperature: 0.85 + attempt * 0.1 });
+      const raw = await callGemini(prompt + steer({ allowQuestion: ev.type !== 'idle' }) + (attempt ? (lastWhy === 'english' ? ENGLISH_NOTE : /religion/.test(lastWhy) ? RELIGION_NOTE : '\n[ردك السابق انرفض (مكرر أو طويل أو فيه نكتة عن فئة من الناس). جيبي رد أقصر بفكرة وبداية مختلفة تماماً.]') : ''), { temperature: 0.85 + attempt * 0.1 });
       text = clean(raw);
-      const ph = checkText(text);
+      const ph = checkReply(text);
       const sim = (ph ? `postfilter:${ph.category}:${ph.hit}` : null) || (latinRatio(text) > 0.12 ? 'english' : null) || tooSimilar(text) || (words(text).length > (ev.type === 'chat' && /نكت/.test(ev.text || '') ? 30 : 24) ? 'too-long' : null) || (STEREO.test(normalize(text)) ? 'stereotype' : null);
       if (!sim) break;
       lastWhy = sim;
       console.warn('[brain] rejected reply, retrying:', sim);
       if (attempt === 2 && sim === 'english') text = stripLatin(text).split(' ').length >= 4 ? stripLatin(text) : fallbackLine(ev, name);
       if (attempt === 2 && sim === 'stereotype') text = fallbackLine(ev, name);
-      if (attempt === 2 && ph) text = deflection();
+      if (attempt === 2 && ph) text = ph.own ? fallbackLine(ev, name) : deflection();
     }
     if (latinRatio(text) > 0.12) text = stripLatin(text).split(' ').length >= 4 ? stripLatin(text) : fallbackLine(ev, name);
-    const post = checkText(text);
-    if (post) return { text: deflection(), source: 'postfilter', blocked: post };
+    const post = checkReply(text);
+    if (post) return { text: post.own ? fallbackLine(ev, name) : deflection(), source: 'postfilter', blocked: post };
     history.push({ u: prompt, m: text });
     while (history.length > MAX_HISTORY) history.shift();
     if (ev.type === 'chat') rememberComment(name, ev.text, text);
@@ -261,18 +265,18 @@ async function replyToHost(heard) {
   try {
     let text = ''; let lastWhy = '';
     for (let attempt = 0; attempt < 3; attempt++) {
-      const raw = await callGemini(prompt + (attempt ? (lastWhy === 'english' ? ENGLISH_NOTE : '\n[ردك السابق انرفض (طويل أو يشبه ردودك الأخيرة أو فيه كلام ممنوع). جيبي رد أقصر ومختلف.]') : ''), { temperature: 0.7 + attempt * 0.1, useHistory: false, maxTokens: 90 });
+      const raw = await callGemini(prompt + (attempt ? (lastWhy === 'english' ? ENGLISH_NOTE : /religion/.test(lastWhy) ? RELIGION_NOTE : '\n[ردك السابق انرفض (طويل أو يشبه ردودك الأخيرة أو فيه كلام ممنوع). جيبي رد أقصر ومختلف.]') : ''), { temperature: 0.7 + attempt * 0.1, useHistory: false, maxTokens: 90 });
       text = trimTo(clean(raw), 22);
-      const ph = checkText(text);
+      const ph = checkReply(text);
       const sim = (ph ? `postfilter:${ph.category}:${ph.hit}` : null) || (latinRatio(text) > 0.12 ? 'english' : null) || (recent.slice(-3).includes(text) ? 'repeat' : null) || (words(text).length > 30 ? 'too-long' : null) || (STEREO.test(normalize(text)) ? 'stereotype' : null);
       if (!sim) break;
       lastWhy = sim;
       console.warn('[brain] rejected host reply, retrying:', sim);
-      if (attempt === 2) text = ph ? deflection() : (sim === 'english' && stripLatin(text).split(' ').length >= 4 ? stripLatin(text) : (sim === 'too-long' ? text : HOST_FALLBACK[hfi++ % HOST_FALLBACK.length]));
+      if (attempt === 2) text = ph ? (ph.own ? HOST_FALLBACK[hfi++ % HOST_FALLBACK.length] : deflection()) : (sim === 'english' && stripLatin(text).split(' ').length >= 4 ? stripLatin(text) : (sim === 'too-long' ? text : HOST_FALLBACK[hfi++ % HOST_FALLBACK.length]));
     }
     if (latinRatio(text) > 0.12) text = stripLatin(text).split(' ').length >= 4 ? stripLatin(text) : HOST_FALLBACK[hfi++ % HOST_FALLBACK.length];
-    const post = checkText(text);
-    if (post) text = deflection();
+    const post = checkReply(text);
+    if (post) text = post.own ? HOST_FALLBACK[hfi++ % HOST_FALLBACK.length] : deflection();
     rememberTurn('host', heard);
     rememberTurn('lammoa', text);
     return { text, source: post ? 'postfilter' : 'model', blocked: post || undefined };

@@ -39,9 +39,9 @@ export const config = {
   micMode: env.MIC_MODE || 'server',
   ttsEnabled: env.TTS_ENABLED !== '0',
   ttsEngine: (env.TTS_ENGINE || 'auto').toLowerCase(), // auto (Gemini Zephyr first, Edge fallback) | edge (Edge first) | gemini (Gemini only)
-  geminiTtsTimeoutMs: Number(env.GEMINI_TTS_TIMEOUT_MS || 12000), // per Gemini TTS call before trying the next model / Edge
-  geminiTtsBudgetMs: Number(env.GEMINI_TTS_BUDGET_MS || 16000),   // total time on Gemini models before falling back to Edge
-  ttsSplit: env.TTS_SPLIT || 'edge', // split replies into sentence chunks: edge (only when Edge is the engine) | always | never
+  geminiTtsTimeoutMs: Number(env.GEMINI_TTS_TIMEOUT_MS || 10000), // per Gemini TTS call before trying the next model / Edge
+  ttsSplit: env.TTS_SPLIT || 'always', // split replies into sentence chunks synthesized in parallel: always | edge (only for Edge) | never
+  ttsHedgeMs: Number(env.GEMINI_TTS_HEDGE_MS || 2500), // start the backup Gemini TTS model if the first is slower than this
   geminiCooldownMs: Number(env.GEMINI_TTS_COOLDOWN_MS || 5 * 60 * 1000),
   edgeVoice: env.EDGE_VOICE || 'ar-SA-ZariyahNeural',
   edgeFormat: env.EDGE_FORMAT || 'audio-24khz-96kbitrate-mono-mp3', // best format the free Edge endpoint accepts

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "demo": "node src/server.js --demo",
-    "test": "node test/filter-test.js && node test/conversation-test.js && node test/v3-test.js"
+    "test": "node test/filter-test.js && node test/conversation-test.js && node test/v3-test.js && node test/religion-test.js"
   },
   "keywords": [],
   "author": "",
