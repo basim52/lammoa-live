@@ -13,6 +13,7 @@ t('ignore empty', !g.check('', now).ok);
 t('ignore too short', g.check('اه', now).reason === 'too-short');
 t('ignore filler', g.check('امم طيب', now).reason === 'filler');
 t('ignore noise letters', !g.check('ههههههه', now).ok);
+t('ignore repetitive hallucination', g.check('لموعة لمعة لمعة لمعة لمعة لمعة لمعة', now).reason === 'repetitive');
 t('accept real speech', g.check('لموعة وش رايك نسوي تحدي الليلة؟', now).ok);
 t('dedupe same sentence', g.check('لموعة وش رايك نسوي تحدي الليلة', now + 3000).reason === 'duplicate');
 t('allow repeat after window', g.check('لموعة وش رايك نسوي تحدي الليلة', now + 20000).ok);

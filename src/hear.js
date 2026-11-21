@@ -21,6 +21,8 @@ export class HearGate {
     const ws = n.split(' ');
     if (ws.every((w) => FILLER.has(w) || /^(ه|ا|م)+$/.test(w))) return { ok: false, reason: 'filler' };
     if (/^(.)\1*$/.test(letters)) return { ok: false, reason: 'noise' };
+    // speech-to-text sometimes "hears" words in beeps/music: same word over and over
+    if (ws.length >= 4 && new Set(ws).size / ws.length < 0.45) return { ok: false, reason: 'repetitive' };
     const seen = this.recent.get(n);
     if (seen && now - seen < this.dedupeMs) return { ok: false, reason: 'duplicate' };
     this.times = this.times.filter((t) => now - t < 60000);
@@ -39,7 +41,7 @@ export async function transcribe(wav) {
   const body = {
     contents: [{ role: 'user', parts: [
       { inlineData: { mimeType: 'audio/wav', data: Buffer.from(wav).toString('base64') } },
-      { text: 'اكتب الكلام المنطوق في هذا المقطع حرفياً بالحروف العربية كما قيل (غالباً لهجة سعودية/خليجية). المتكلم يكلم شخصية كرتونية اسمها «لمّوعة» في بث «فرفشة»، فإذا سمعت اسم يشبهها اكتبه «لموعة». اكتب النص فقط بدون أي شرح أو علامات. إذا ما فيه كلام بشري واضح (صمت، ضجة، موسيقى، كلام غير مفهوم) اكتب فقط: <empty>' },
+      { text: 'اكتب الكلام المنطوق في هذا المقطع حرفياً بالحروف العربية كما قيل (غالباً لهجة سعودية/خليجية). المتكلم يكلم شخصية كرتونية اسمها «لمّوعة» في بث «فرفشة»، فإذا سمعت اسم يشبهها اكتبه «لموعة». اكتب النص فقط بدون أي شرح أو علامات. إذا ما فيه كلام بشري واضح (صمت، ضجة، صفارة أو نغمة، موسيقى، كلام غير مفهوم) اكتب فقط: <empty>' },
     ] }],
     generationConfig: { temperature: 0, maxOutputTokens: 200 },
   };

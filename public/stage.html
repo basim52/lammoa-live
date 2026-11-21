@@ -50,6 +50,15 @@
   #start { position:fixed; inset:0; z-index:10; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4vmin; background:rgba(11,42,111,.82); color:#fff; font-family:Lalezar,sans-serif; cursor:pointer; }
   #start button { font:inherit; font-size:7vmin; background:var(--orange); color:#fff; border:1vmin solid #fff; border-radius:6vmin; padding:2vmin 8vmin; box-shadow:0 1.5vmin 0 rgba(0,0,0,.25); }
   #start p { font-family:Tajawal,sans-serif; font-weight:700; font-size:3.4vmin; margin:0; opacity:.9; text-align:center; padding:0 6vmin; }
+  /* rotating location backgrounds (default look; ?bg=green|blue|white turns them off) */
+  #scene { position:absolute; inset:0; z-index:0; display:none; overflow:hidden; }
+  body.scenes #scene { display:block; }
+  #scene .layer { position:absolute; inset:-2%; background-size:cover; background-position:center; opacity:0; transition:opacity 2.5s ease; animation:drift 60s ease-in-out infinite alternate; }
+  #scene .layer.on { opacity:1; }
+  #scene::after { content:''; position:absolute; inset:0; background:radial-gradient(ellipse at 50% 55%, rgba(255,255,255,0) 45%, rgba(0,0,0,.18) 100%); }
+  @keyframes drift { from { transform:scale(1.02) translateX(-.8%); } to { transform:scale(1.06) translateX(.8%); } }
+  body.scenes #wrap::before { content:''; position:absolute; inset:-10% -14% -4%; background:radial-gradient(closest-side, rgba(255,255,255,.5), rgba(255,255,255,0)); z-index:-1; pointer-events:none; }
+  #stage { z-index:1; }
   #dot { position:fixed; bottom:1.5vmin; left:1.5vmin; width:1.6vmin; height:1.6vmin; border-radius:50%; background:#e33; opacity:.6; z-index:4; }
   body.online #dot { background:#2c4; opacity:.35; }
   #mic { position:fixed; bottom:1.2vmin; left:50%; transform:translateX(-50%); z-index:4; max-width:70vw; font-family:Tajawal,sans-serif; font-weight:800; font-size:3.2vmin; direction:rtl; pointer-events:none; }
@@ -59,6 +68,7 @@
 </style>
 </head>
 <body>
+<div id="scene"><div class="layer"></div><div class="layer"></div></div>
 <canvas id="fx"></canvas>
 <div id="stage">
   <div id="bubbleZone"><div id="bubble"><div id="tag">لمّوعة</div><div id="who"><span class="chip" id="user"></span><span id="comment"></span></div><div id="text"></div></div></div>
@@ -69,6 +79,32 @@
 <script src="/lammoa.js"></script>
 <script src="/mic.js"></script>
 <script>
+  // ---- location backgrounds: shuffle, cross-fade every few minutes (?bgmin=3), ?bg=cafe pins one ----
+  (() => {
+    const PLACES = ['majlis', 'cafe', 'studio', 'desert', 'city', 'garden'];
+    const want = (qs.get('bg') || '').toLowerCase();
+    if (want && !PLACES.includes(want)) return; // green / blue / white keep their plain colors
+    document.body.classList.add('scenes');
+    const layers = document.querySelectorAll('#scene .layer');
+    const order = want ? [want] : PLACES.slice().sort(() => Math.random() - 0.5);
+    let i = 0, front = 0;
+    function show(name) {
+      const img = new Image();
+      img.onload = () => {
+        const next = layers[1 - front];
+        next.style.backgroundImage = `url(/bg/${name}.webp)`;
+        next.classList.add('on'); layers[front].classList.remove('on'); front = 1 - front;
+        window.__scene = name;
+      };
+      img.src = `/bg/${name}.webp`;
+    }
+    show(order[0]);
+    if (order.length > 1) {
+      const mins = Math.max(0.1, Number(qs.get('bgmin')) || 3);
+      setInterval(() => { i = (i + 1) % order.length; show(order[i]); }, mins * 60000);
+      order.forEach((n) => { new Image().src = `/bg/${n}.webp`; }); // warm the cache
+    }
+  })();
   let lock = null;
   async function keepAwake() {
     try { if ('wakeLock' in navigator) { lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => { lock = null; }); } } catch (e) { console.warn('wakeLock', e); }
