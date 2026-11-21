@@ -33,7 +33,7 @@ async function synthGemini(text) {
       ttsState.lastModel = model; return r;
     } catch (e) {
       ttsState.lastGeminiError = e.message; console.warn('[tts]', e.message);
-      if (/HTTP 429/.test(e.message)) { cooldown.set(model, Date.now() + config.geminiCooldownMs); ttsState.cooldowns[model] = new Date(Date.now() + config.geminiCooldownMs).toISOString(); }
+      if (/HTTP 429/.test(e.message)) { if (!((cooldown.get(model) || 0) > Date.now())) cooldown.set(model, Date.now() + config.geminiCooldownMs); ttsState.cooldowns[model] = new Date(cooldown.get(model)).toISOString(); }
       throw e;
     } finally { ttsState.geminiCooldownUntil = Math.min(...config.ttsModels.map((m) => cooldown.get(m) || 0)); }
   };
@@ -106,7 +106,11 @@ export async function synthOnce(text, model, timeoutMs = 30000) {
       body: JSON.stringify(body),
     });
     const j = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`Gemini TTS ${model} HTTP ${res.status}: ${j?.error?.status || ''}`);
+    if (!res.ok) {
+      const det = (j?.error?.details || []).map((d) => [(d.violations || []).map((v) => `${v.quotaId || ''}${v.quotaValue ? '=' + v.quotaValue : ''}`).join(','), d.retryDelay ? 'retry ' + d.retryDelay : ''].filter(Boolean).join(' ')).filter(Boolean).join(' ');
+      if (/HTTP 429/.test(`HTTP ${res.status}`)) { const m = String(det).match(/retry (\d+)/); if (m) cooldown.set(model, Date.now() + Math.min(config.geminiCooldownMs, (Number(m[1]) + 1) * 1000)); }
+      throw new Error(`Gemini TTS ${model} HTTP ${res.status}: ${j?.error?.status || ''}${det ? ' [' + det + ']' : ''}`);
+    }
     const part = (j.candidates?.[0]?.content?.parts || []).find((p) => p.inlineData?.data);
     if (!part) throw new Error(`Gemini TTS no audio (${j.candidates?.[0]?.finishReason || 'unknown'})`);
     const mime = part.inlineData.mimeType || '';
