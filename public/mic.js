@@ -8,13 +8,14 @@
   const pending = []; // texts waiting for the stage key
 
   // ---- small indicator ----
-  const el = document.createElement('div'); el.id = 'mic'; el.innerHTML = '<i></i><span></span>'; document.body.appendChild(el);
-  const label = el.querySelector('span'), dot = el.querySelector('i');
+  const el = document.createElement('div'); el.id = 'mic'; el.innerHTML = '<span></span>'; document.body.appendChild(el);
+  const label = el.querySelector('span');
+  const LABELS = { listen: '🎤 أسمعك…', paused: 'لمّوعة تتكلم…', thinking: 'أفكر…', wait: 'اسمح للمايك…', denied: 'المايك مقفل، اسمح للمتصفح' };
   let heardTimer;
   function ui(state, text = '') {
     el.dataset.state = state;
     if (state !== 'heard') clearTimeout(heardTimer);
-    label.textContent = text;
+    label.textContent = text || LABELS[state] || '';
     window.__micState = state;
   }
   function showHeard(t) {
@@ -68,12 +69,12 @@
   let stream = null, srcNode = null, proc = null, sink = null;
   let inUtt = false, buf = [], pre = [], loud = 0, voicedMs = 0, silentMs = 0, noise = 0.004, uploading = 0;
   async function startServer() {
-    ui('wait', 'اسمح للمايك…');
+    ui('wait');
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true } });
     } catch (e) {
       console.warn('mic', e);
-      ui('denied', 'المايك مقفول: اسمح له من قفل المتصفح');
+      ui('denied');
       setTimeout(() => { if (mode === 'server' && !stream) { mode = null; apply(); } }, 8000);
       return;
     }
@@ -98,7 +99,6 @@
     let s = 0; for (let i = 0; i < frame.length; i++) s += frame[i] * frame[i];
     const rms = Math.sqrt(s / frame.length), fms = frame.length / ctx.sampleRate * 1000;
     window.__micLevel = rms;
-    dot.style.transform = `scale(${1 + Math.min(1.2, rms * 25)})`;
     if (speaking || Date.now() < quietUntil) { resetUtt(); pre = []; return; }
     const thr = Math.max(0.012, noise * 3.5);
     if (!inUtt) {
@@ -130,7 +130,7 @@
   }
   async function upload(frames, rate) {
     if (uploading >= 2) return;
-    uploading++; ui('thinking', '…');
+    uploading++; ui('thinking');
     try {
       const j = await send('/api/hear-audio', toWav(frames, rate), { 'content-type': 'audio/wav' });
       window.__lastHeard = j;
