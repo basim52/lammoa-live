@@ -32,7 +32,7 @@ export const config = {
   textModels: (env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash-lite,gemini-3.1-flash-lite').split(',').map((x) => x.trim()).filter(Boolean),
   thinkingLevel: env.GEMINI_THINKING || 'minimal',
   hedgeMs: Number(env.GEMINI_HEDGE_MS || 1500),
-  ttsModels: (env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts,gemini-3.8-flash-lite-tts,gemini-3.1-flash-tts-preview').split(',').map((x) => x.trim()).filter(Boolean),
+  ttsModels: (env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts,gemini-3.1-flash-tts-preview').split(',').map((x) => x.trim()).filter(Boolean),
   voice: env.GEMINI_VOICE || 'Zephyr',
   sttModels: (env.GEMINI_STT_MODEL || env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash-lite,gemini-3.1-flash-lite').split(',').map((x) => x.trim()).filter(Boolean),
   hostName: (env.HOST_NAME || '').trim(),

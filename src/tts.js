@@ -23,7 +23,13 @@ async function synthGemini(text) {
   for (const model of liveModels()) {
     const left = config.geminiTtsBudgetMs - (Date.now() - t0);
     if (left < 1500) { lastErr = new Error('Gemini TTS budget used'); break; }
-    try { const r = await synthOnce(text, model, Math.min(config.geminiTtsTimeoutMs, left)); ttsState.lastModel = model; return r; }
+    try {
+      const r = await synthOnce(text, model, Math.min(config.geminiTtsTimeoutMs, left));
+      // some TTS models read the line twice; far longer than the text needs = reject and try the next engine
+      const words = String(text).split(/\s+/).filter(Boolean).length;
+      if (r.durationMs > 1500 + words * 800) throw new Error(`Gemini TTS ${model} too long (${Math.round(r.durationMs / 1000)}s for ${words} words)`);
+      ttsState.lastModel = model; return r;
+    }
     catch (e) {
       lastErr = e; ttsState.lastGeminiError = e.message;
       if (/HTTP 429/.test(e.message)) { cooldown.set(model, Date.now() + config.geminiCooldownMs); ttsState.cooldowns[model] = new Date(Date.now() + config.geminiCooldownMs).toISOString(); }
