@@ -1,0 +1,22 @@
+{
+  "name": "farfasha-lammoa-live",
+  "version": "1.0.0",
+  "description": "لمّوعة: مضيفة كرتونية لبث تيك توك",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "demo": "node src/server.js --demo",
+    "test": "node test/filter-test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "tiktok-live-connector": "^2.5.0",
+    "ws": "^8.23.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

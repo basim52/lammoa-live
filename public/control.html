@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>لوحة تحكم لمّوعة</title>
+<link rel="stylesheet" href="/fonts/fonts.css">
+<style>
+  body { font-family:Tajawal,sans-serif; background:#FFF8E7; color:#0B2A6F; margin:0; padding:20px; }
+  h1 { font-family:Lalezar,sans-serif; margin:0 0 6px; font-size:34px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+  .card { background:#fff; border:3px solid #0B2A6F; border-radius:18px; padding:16px; box-shadow:0 5px 0 #0B2A6F33; }
+  h2 { margin:0 0 10px; font-size:20px; }
+  input, textarea, select { width:100%; box-sizing:border-box; font:inherit; font-size:16px; padding:9px 11px; border:2px solid #0B2A6F55; border-radius:10px; margin-bottom:8px; }
+  button { min-height:46px; font:800 16px Tajawal,sans-serif; background:#FF8A1E; color:#fff; border:0; border-radius:12px; padding:10px 14px; cursor:pointer; margin:3px 0 3px 4px; }
+  button.alt { background:#1E5EFF; } button.gray { background:#6b7799; } button.pink { background:#FF4D6D; }
+  #log { background:#0B2A6F; color:#d8e2ff; font:13px/1.5 ui-monospace,monospace; height:300px; overflow:auto; padding:10px; border-radius:12px; direction:ltr; text-align:left; white-space:pre-wrap; }
+  .row { display:flex; gap:8px; } .row > * { flex:1; }
+  .pill { display:inline-block; background:#FFC93C; padding:2px 10px; border-radius:20px; font-weight:800; margin-left:6px; }
+  iframe { width:100%; aspect-ratio:9/16; border:3px solid #0B2A6F; border-radius:14px; background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0/24px 24px; }
+  .quick button { background:#3FC1C9; }
+</style>
+</head>
+<body>
+<h1>لوحة تحكم لمّوعة 🔥</h1>
+<div id="status" style="margin-bottom:14px"></div>
+<div class="grid">
+  <div class="card">
+    <h2>حساب تيك توك</h2>
+    <div class="row"><input id="ttUser" placeholder="اسم حسابك بدون @" dir="ltr"><button onclick="setTT()" style="flex:0 0 auto">اتصال</button></div>
+    <p style="margin:4px 0 0;font-size:14px">لمّوعة تتصل تلقائياً أول ما تبدأ البث، وتعيد المحاولة كل دقيقة إذا البث مو شغال.</p>
+    <button class="gray" onclick="post('/api/tiktok',{username:''})">فصل تيك توك</button>
+  </div>
+  <div class="card">
+    <h2>تعليق تجريبي</h2>
+    <div class="row"><input id="cUser" placeholder="اسم المشاهد" value="أبو فهد"><select id="cType"><option value="chat">تعليق</option><option value="gift">هدية</option><option value="join">دخول</option><option value="follow">متابعة</option></select></div>
+    <input id="cText" placeholder="نص التعليق أو اسم الهدية">
+    <button onclick="sendEvent()">أرسل</button>
+    <div class="quick">
+      <button onclick="q('chat','سارة','وش أحلى أكلة عندكم؟')">سؤال</button>
+      <button onclick="q('chat','عبدالله','قولي نكتة يا لموعة')">نكتة</button>
+      <button onclick="q('gift','نوف','وردة')">هدية وردة</button>
+      <button onclick="q('join','خالد','')">دخول</button>
+      <button onclick="q('chat','مشاغب','وش رايك في السياسة؟')">موضوع ممنوع</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>قولي هذا (كلامك أنت)</h2>
+    <textarea id="say" rows="3" placeholder="اكتب جملة وتقولها لمّوعة بصوتها كما هي"></textarea>
+    <button class="alt" onclick="say()">قوليها</button>
+    <hr style="border:0;border-top:2px dashed #0B2A6F33">
+    <button class="gray" onclick="ctl('pause')">إيقاف مؤقت</button>
+    <button onclick="ctl('resume')">تشغيل</button>
+    <button class="pink" onclick="ctl('skip')">تخطي الحالي</button>
+    <button class="gray" onclick="ctl('clear')">مسح الطابور</button>
+  </div>
+  <div class="card"><h2>معاينة الطبقة <span style="font-size:13px">(اضغط داخلها لتفعيل الصوت)</span></h2><iframe id="pv" src="/stage?autostart&nofs"></iframe></div>
+  <div class="card" style="grid-column:1/-1"><h2>السجل</h2><div id="log"></div></div>
+</div>
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const post = (u, b) => fetch(u, { method:'POST', headers:{'content-type':'application/json','x-control-token':TOKEN}, body: JSON.stringify(b) }).then(r => r.json());
+function sendEvent() { const t = cType.value; post('/api/event', { type:t, user:cUser.value, text: t==='chat'?cText.value:'', gift: t==='gift'?(cText.value||'وردة'):undefined }); cText.value=''; }
+function q(type,user,text) { post('/api/event', { type, user, text: type==='chat'?text:'', gift: type==='gift'?text:undefined }); }
+function say() { if (say_.value.trim()) post('/api/say', { text: say_.value }); say_.value=''; }
+const say_ = document.getElementById('say');
+function setTT() { post('/api/tiktok', { username: ttUser.value }); }
+function ctl(action) { post('/api/control', { action }); }
+cText.addEventListener('keydown', e => { if (e.key==='Enter') sendEvent(); });
+async function refresh() {
+  const s = await fetch('/api/status', { headers: { 'x-control-token': TOKEN } }).then(r => r.json());
+  status.innerHTML = `<span class="pill">تيك توك: ${s.tiktok}${s.tiktokUser?' @'+s.tiktokUser:''}</span><span class="pill">مفتاح Gemini: ${s.hasKey?'موجود':'غير موجود'}</span><span class="pill">الطابور: ${s.queue}</span><span class="pill">${s.paused?'متوقفة':'شغالة'}</span><span class="pill">شاشة التابلت: ${location.origin}/stage</span>`;
+  if (!ttUser.value && s.tiktokUser && document.activeElement !== ttUser) ttUser.value = s.tiktokUser;
+  log.textContent = s.logs.join('\n'); log.scrollTop = log.scrollHeight;
+}
+setInterval(refresh, 1500); refresh();
+</script>
+</body>
+</html>

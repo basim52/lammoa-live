@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#FF8A1E">
+<title>لمّوعة — شاشة البث</title>
+<link rel="stylesheet" href="/fonts/fonts.css">
+<style>
+  :root { --s: 1; --navy:#0B2A6F; --pink:#FF4D6D; --orange:#FF8A1E; --gold:#FFC93C; }
+  html,body { margin:0; height:100%; overflow:hidden; -webkit-user-select:none; user-select:none; }
+  body { background: radial-gradient(circle at 50% 38%, #FFE27A 0%, #FFC93C 38%, #FF8A1E 100%); }
+  body.green { background:#00B140; }
+  body.blue { background: radial-gradient(circle at 50% 40%, #5B8CFF, #1E5EFF 60%, #0B2A6F); }
+  body.white { background:#FFF8E7; }
+  #stage { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3vmin; padding:4vmin; box-sizing:border-box; font-family:Tajawal,sans-serif; }
+  #fx { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; }
+  #bubbleZone { flex:0 0 auto; width:100%; min-height:30vh; display:flex; align-items:flex-end; justify-content:center; }
+  #wrap { position:relative; flex:0 0 auto; height:min(52vh, 80vw); aspect-ratio: 615 / 760; z-index:1; }
+  #char { width:100%; height:100%; animation: float 3.2s ease-in-out infinite; transform-origin:50% 100%; }
+  #body { width:100%; position:relative; transform-origin:50% 90%; filter: drop-shadow(0 1.5vmin 2vmin rgba(0,0,0,.25)); }
+  #body img { width:100%; display:block; }
+  #body img.closed { position:absolute; inset:0; }
+  #shadow { width:55%; height:3vmin; margin:-1vmin auto 0; border-radius:50%; background:rgba(0,0,0,.18); filter:blur(5px); animation: shadow 3.2s ease-in-out infinite; }
+  @keyframes float { 0%,100% { transform: translateY(0) rotate(-1.5deg);} 50% { transform: translateY(-2.5vmin) rotate(1.5deg);} }
+  @keyframes shadow { 0%,100% { transform: scaleX(1); opacity:.9 } 50% { transform: scaleX(.8); opacity:.5 } }
+  #bubble { position:relative; max-width:92vw; min-width:40vw; background:#fff; color:var(--navy); border:1vmin solid var(--navy); border-radius:5vmin; padding:3.5vmin 4vmin 3.8vmin;
+    box-shadow:0 1.6vmin 0 rgba(11,42,111,.28); transform:scale(.5) translateY(4vmin); opacity:0; transition: transform .35s cubic-bezier(.2,1.6,.4,1), opacity .25s; z-index:3; }
+  #bubble.show { transform:none; opacity:1; }
+  #bubble::after { content:''; position:absolute; bottom:-5vmin; left:50%; margin-left:-2.6vmin; border:2.6vmin solid transparent; border-top:3.4vmin solid var(--navy); }
+  #bubble::before { content:''; position:absolute; bottom:-3.1vmin; left:50%; margin-left:-1.6vmin; border:1.6vmin solid transparent; border-top:2.2vmin solid #fff; z-index:1; }
+  #tag { position:absolute; top:-3.6vmin; right:4vmin; background:var(--gold); color:var(--navy); border:.7vmin solid var(--navy); border-radius:2.5vmin; padding:.2vmin 2.2vmin; font-family:Lalezar,sans-serif; font-size:3.6vmin; }
+  #who { display:none; align-items:center; gap:1.6vmin; margin-bottom:1.6vmin; font-weight:800; font-size:3.4vmin; }
+  #who.on { display:flex; }
+  #who .chip { background:linear-gradient(90deg,var(--orange),var(--pink)); color:#fff; padding:.5vmin 2vmin; border-radius:3vmin; max-width:40vmin; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; unicode-bidi:plaintext; }
+  #comment { font-size:3.2vmin; color:#5a6b96; font-weight:700; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; unicode-bidi:plaintext; }
+  #text { font-family:Lalezar,Tajawal,sans-serif; font-size:6vmin; line-height:1.4; unicode-bidi:plaintext; }
+  #text .w { opacity:.28; transition:opacity .15s; } #text .w.on { opacity:1; }
+  /* landscape: character beside the bubble */
+  @media (orientation: landscape) {
+    #stage { flex-direction:row; gap:5vmin; }
+    #bubbleZone { width:auto; flex:1 1 0; min-height:0; max-width:58vw; justify-content:flex-start; align-items:center; order:0; }
+    #wrap { height:min(80vh, 42vw); order:1; }
+    #bubble { max-width:58vw; }
+    #bubble::after { bottom:auto; top:50%; left:-5.2vmin; margin:-2.6vmin 0 0; border:2.6vmin solid transparent; border-right:3.4vmin solid var(--navy); }
+    #bubble::before { bottom:auto; top:50%; left:-3.2vmin; margin:-1.6vmin 0 0; border:1.6vmin solid transparent; border-right:2.2vmin solid #fff; }
+    #text { font-size:5.6vmin; }
+  }
+  #start { position:fixed; inset:0; z-index:10; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4vmin; background:rgba(11,42,111,.82); color:#fff; font-family:Lalezar,sans-serif; cursor:pointer; }
+  #start button { font:inherit; font-size:7vmin; background:var(--orange); color:#fff; border:1vmin solid #fff; border-radius:6vmin; padding:2vmin 8vmin; box-shadow:0 1.5vmin 0 rgba(0,0,0,.25); }
+  #start p { font-family:Tajawal,sans-serif; font-weight:700; font-size:3.4vmin; margin:0; opacity:.9; text-align:center; padding:0 6vmin; }
+  #dot { position:fixed; bottom:1.5vmin; left:1.5vmin; width:1.6vmin; height:1.6vmin; border-radius:50%; background:#e33; opacity:.6; z-index:4; }
+  body.online #dot { background:#2c4; opacity:.35; }
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div id="stage">
+  <div id="bubbleZone"><div id="bubble"><div id="tag">لمّوعة</div><div id="who"><span class="chip" id="user"></span><span id="comment"></span></div><div id="text"></div></div></div>
+  <div id="wrap"><div id="char"><div id="body"><img id="imgOpen" alt=""><img id="imgClosed" class="closed" alt=""></div></div><div id="shadow"></div></div>
+</div>
+<div id="dot" title="الاتصال"></div>
+<div id="start"><button id="go">اضغط للتشغيل</button><p>بعد الضغط: الشاشة تبقى شغالة وصوت لمّوعة يطلع من الجهاز. ارفع الصوت.</p></div>
+<script src="/lammoa.js"></script>
+<script>
+  let lock = null;
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) { lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => { lock = null; }); } } catch (e) { console.warn('wakeLock', e); }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !lock) keepAwake(); });
+  async function start() {
+    window.unlockAudio();
+    try { if (!document.fullscreenElement && document.documentElement.requestFullscreen && !qs.has('nofs')) await document.documentElement.requestFullscreen({ navigationUI: 'hide' }); } catch {}
+    await keepAwake();
+    document.getElementById('start').style.display = 'none';
+    showBubble({ user: '', text: 'جاهزة! اكتبوا تعليقاتكم وأنا أرد عليكم.', durationMs: 1500 }); hideBubbleSoon(5000);
+  }
+  document.getElementById('start').addEventListener('click', start);
+  if (qs.has('autostart')) start();
+</script>
+</body>
+</html>

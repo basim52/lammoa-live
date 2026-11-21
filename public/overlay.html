@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>لمّوعة — Overlay</title>
+<link rel="stylesheet" href="/fonts/fonts.css">
+<style>
+  :root { --s: 1; --navy:#0B2A6F; --pink:#FF4D6D; --orange:#FF8A1E; --gold:#FFC93C; --teal:#3FC1C9; --blue:#1E5EFF; }
+  html,body { margin:0; height:100%; background:transparent; overflow:hidden; }
+  body.checker { background: repeating-conic-gradient(#cfcfcf 0 25%, #f4f4f4 0 50%) 0 0/40px 40px; }
+  body.dark { background: linear-gradient(160deg,#1b1f3a,#0d0f1f); }
+  #stage { position:absolute; inset:0; font-family: 'Tajawal', 'Segoe UI', Tahoma, sans-serif; }
+  #wrap { position:absolute; bottom:4vh; left:4vw; width:calc(min(42vw, 30vh) * var(--s)); }
+  body.right #wrap { left:auto; right:4vw; }
+  #char { position:relative; width:100%; animation: float 3.2s ease-in-out infinite; transform-origin: 50% 100%; }
+  #body { width:100%; transform-origin:50% 90%; transition: transform .08s linear, filter .2s; filter: drop-shadow(0 1vh 1.6vh rgba(0,0,0,.35)); }
+  #body img { width:100%; display:block; }
+  #body img.closed { position:absolute; inset:0; }
+  #shadow { width:60%; height:2.2vh; margin:-0.5vh auto 0; border-radius:50%; background:rgba(0,0,0,.28); filter:blur(4px); animation: shadow 3.2s ease-in-out infinite; }
+  @keyframes float { 0%,100% { transform: translateY(0) rotate(-1.5deg);} 50% { transform: translateY(-2.2vh) rotate(1.5deg);} }
+  @keyframes shadow { 0%,100% { transform: scaleX(1); opacity:.9 } 50% { transform: scaleX(.8); opacity:.55 } }
+  #fx { position:absolute; inset:0; pointer-events:none; }
+  #bubble { position:absolute; bottom: calc(4vh + min(42vw, 30vh) * var(--s) * 1.25); left:4vw; max-width:min(88vw, 62vh); min-width:30vw;
+    background:#fff; color:var(--navy); border:0.55vh solid var(--navy); border-radius:3.2vh; padding:2vh 2.6vh 2.2vh;
+    box-shadow: 0 1.2vh 0 rgba(11,42,111,.25), 0 2vh 4vh rgba(0,0,0,.25);
+    transform-origin: 15% 110%; transform: scale(.4) translateY(4vh); opacity:0; transition: transform .35s cubic-bezier(.2,1.6,.4,1), opacity .25s; }
+  body.right #bubble { left:auto; right:4vw; transform-origin: 85% 110%; }
+  #bubble.show { transform: scale(1) translateY(0); opacity:1; }
+  #bubble::after { content:''; position:absolute; bottom:-3.2vh; left:12%; border:1.6vh solid transparent; border-top:2vh solid var(--navy); }
+  body.right #bubble::after { left:auto; right:12%; }
+  #bubble::before { content:''; position:absolute; bottom:-2.1vh; left:calc(12% + .55vh); border:1.05vh solid transparent; border-top:1.4vh solid #fff; z-index:1; }
+  body.right #bubble::before { left:auto; right:calc(12% + .55vh); }
+  #who { display:none; align-items:center; gap:1vh; margin-bottom:1vh; font-weight:800; font-size:2.1vh; }
+  #who.on { display:flex; }
+  #who .chip { background:linear-gradient(90deg,var(--orange),var(--pink)); color:#fff; padding:.4vh 1.4vh; border-radius:2vh; max-width:40vh; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; direction:auto; unicode-bidi:plaintext; }
+  #comment { font-size:2vh; color:#5a6b96; font-weight:700; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; unicode-bidi:plaintext; }
+  #text { font-family:'Lalezar','Tajawal',sans-serif; font-size:3.6vh; line-height:1.45; color:var(--navy); unicode-bidi:plaintext; }
+  #text .w { opacity:.28; transition: opacity .15s; }
+  #text .w.on { opacity:1; }
+  #tag { position:absolute; top:-2.2vh; right:2.4vh; background:var(--gold); color:var(--navy); border:.4vh solid var(--navy); border-radius:1.6vh; padding:.2vh 1.4vh; font-family:'Lalezar',sans-serif; font-size:2.2vh; }
+  body.right #tag { right:auto; left:2.4vh; }
+  #hint { position:fixed; top:1vh; left:50%; transform:translateX(-50%); background:#000a; color:#fff; padding:1vh 2vh; border-radius:1vh; font:700 1.8vh Tajawal,sans-serif; cursor:pointer; display:none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="fx"></canvas>
+  <div id="bubble"><div id="tag">لمّوعة</div><div id="who"><span class="chip" id="user"></span><span id="comment"></span></div><div id="text"></div></div>
+  <div id="wrap">
+    <div id="char"><div id="body"><img id="imgOpen" alt=""><img id="imgClosed" class="closed" alt=""></div></div>
+    <div id="shadow"></div>
+  </div>
+</div>
+<div id="hint">اضغط هنا لتفعيل صوت لمّوعة</div>
+<script src="/lammoa.js"></script>
+</body>
+</html>
